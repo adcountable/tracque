@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "traque",
+      "runtimeExecutable": "/Users/john/.bun/bin/bun",
+      "runtimeArgs": ["run", "dev"],
+      "port": 8081
+    }
+  ]
+}
