@@ -10,6 +10,7 @@ import PromptDiscovery from './pages/PromptDiscovery'
 import Recommendations from './pages/Recommendations'
 import SiteAudit from './pages/SiteAudit'
 import Attribution from './pages/Attribution'
+import Properties from './pages/Properties'
 import Settings from './pages/Settings'
 
 export default function App() {
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="recommendations" element={<Recommendations />} />
         <Route path="site-audit" element={<SiteAudit />} />
         <Route path="attribution" element={<Attribution />} />
+        <Route path="properties" element={<Properties />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>
