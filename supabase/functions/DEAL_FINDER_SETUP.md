@@ -10,7 +10,9 @@ only flows in your Supabase project).
 | Secret | Purpose | Where |
 |---|---|---|
 | `RENTCAST_API_KEY` | Listings, AVM value, long-term rent, price history | rentcast.io (free tier ~50 calls/mo) |
-| `ENRICH_LIMIT` | How many listings to enrich per scan (default `10`) — protects the RentCast free tier | optional |
+| `RECORDS_PROVIDER` | `attom` or `batchdata` — turns on lien/free-and-clear/pre-foreclosure | optional |
+| `ATTOM_API_KEY` / `BATCHDATA_API_KEY` | Key for the chosen records provider | attomdata.com / batchdata.com |
+| `ENRICH_LIMIT` | How many listings to enrich per scan (default `10`) — protects free tiers | optional |
 | `DAVIDSON_PARCELS_URL` | Override the Nashville parcel query endpoint | optional |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Set automatically by Supabase | — |
 
@@ -19,11 +21,12 @@ only flows in your Supabase project).
 - **Listings, DOM, price cuts, AVM, rent** → RentCast (`scan-properties`).
 - **Owner name, out-of-state/absentee, assessed value, tenure** → Davidson
   County ArcGIS parcels, free, no key (`scan-properties/county.ts`).
-- **Free & clear / mortgage liens** → NOT freely available. The parcel layer
-  has no lien data; ground truth is the Register of Deeds (no clean API).
-  Wire a paid provider (ATTOM, BatchData) or a Register-of-Deeds scraper to
-  populate `has_open_mortgage` accurately. Until then it is conservative
-  (assumed financed) and the UI shows equity from AVM only.
+- **Free & clear / mortgage liens / tax liens / pre-foreclosure** → set
+  `RECORDS_PROVIDER=attom` (or `batchdata`) + the key. `scan-properties/
+  records.ts` then populates `has_open_mortgage`, balance, origination
+  vintage, tax liens, and pre-foreclosure, and recomputes equity. Without a
+  provider these stay conservative (assumed financed) — the parcel layer has
+  no lien data and the Register of Deeds has no clean free API.
 - **Owner phone/email (skip trace)** → paid provider (BatchData, REISkip).
   The demo uses a deterministic stub.
 

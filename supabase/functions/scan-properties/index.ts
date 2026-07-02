@@ -12,6 +12,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { enrichFromDavidsonCounty } from './county.ts'
+import { enrichFromRecords, recordsProviderConfigured } from './records.ts'
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -98,6 +99,32 @@ async function fetchProperties(market: string, params: any): Promise<Property[]>
         p.source = 'county'   // mark records-enriched
       } catch (e) {
         console.error('County enrich failed for', p.address, e)
+      }
+    }))
+  }
+
+  // Layer lien/records ground truth (free-and-clear, tax liens, pre-foreclosure).
+  if (recordsProviderConfigured() && base.some(p => p.source !== 'mock')) {
+    const toEnrich = base.slice(0, ENRICH_LIMIT)
+    await Promise.all(toEnrich.map(async (p) => {
+      try {
+        const r = await enrichFromRecords(p.address)
+        if (!r.known) return
+        if (r.has_open_mortgage != null) p.has_open_mortgage = r.has_open_mortgage
+        if (r.est_mortgage_balance != null) p.est_mortgage_balance = r.est_mortgage_balance
+        if (r.mortgage_origination_year != null) p.mortgage_origination_year = r.mortgage_origination_year
+        if (r.mortgage_rate_est != null) p.mortgage_rate_est = r.mortgage_rate_est
+        if (r.last_sale_price != null) p.last_sale_price = r.last_sale_price
+        if (r.last_sale_year != null) {
+          p.last_sale_year = r.last_sale_year
+          p.ownership_years = new Date().getFullYear() - r.last_sale_year
+        }
+        for (const f of r.lien_flags) if (!p.distress_flags.includes(f)) p.distress_flags.push(f)
+        // Recompute equity now that we know the real balance.
+        p.equity = Math.max(0, p.avm_value - (p.has_open_mortgage ? (p.est_mortgage_balance ?? 0) : 0))
+        p.equity_pct = p.avm_value ? +(p.equity / p.avm_value).toFixed(3) : 0
+      } catch (e) {
+        console.error('Records enrich failed for', p.address, e)
       }
     }))
   }
