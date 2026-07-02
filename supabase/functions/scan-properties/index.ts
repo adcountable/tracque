@@ -11,6 +11,7 @@
 // Scoring mirrors src/lib/propertyEngine.ts so demo and production rank identically.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { enrichFromDavidsonCounty } from './county.ts'
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -43,54 +44,139 @@ function deriveOwner(occupied: boolean, outOfState: boolean): string {
 
 // ── Adapters ───────────────────────────────────────────────
 
-async function fetchProperties(market: string, params: any): Promise<Property[]> {
-  if (RENTCAST_API_KEY) {
-    try {
-      return await fetchFromRentCast(market, params)
-    } catch (e) {
-      console.error('RentCast failed, falling back to mock:', e)
-    }
+// How many listings to enrich with per-property API calls (owner/AVM/rent
+// + county). Enrichment is the expensive part on RentCast's free tier, so
+// it's capped and configurable.
+const ENRICH_LIMIT = Number(Deno.env.get('ENRICH_LIMIT') ?? '10')
+
+// RentCast per-address GET (AVM value / rent). Returns null on any error.
+async function rentcastGet(path: string, address: string): Promise<any | null> {
+  const url = new URL(`https://api.rentcast.io/v1${path}`)
+  url.searchParams.set('address', address)
+  try {
+    const res = await fetch(url, { headers: { 'X-Api-Key': RENTCAST_API_KEY! } })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
   }
-  return mockNashville(18)
 }
 
-// RentCast: on-market listings + value/rent estimates. County records
-// (ownership tenure, liens, distress) are layered on top in production;
-// here we default the records fields conservatively (assume financed).
+async function fetchProperties(market: string, params: any): Promise<Property[]> {
+  let base: Property[]
+  if (RENTCAST_API_KEY) {
+    try {
+      base = await fetchFromRentCast(market, params)
+    } catch (e) {
+      console.error('RentCast failed, falling back to mock:', e)
+      base = mockNashville(18)
+    }
+  } else {
+    base = mockNashville(18)
+  }
+
+  // Layer Davidson County public records over the top N (Nashville only).
+  const isDavidson = /nashville|davidson/i.test(market)
+  if (isDavidson && base.some(p => p.source !== 'mock')) {
+    const toEnrich = base.slice(0, ENRICH_LIMIT)
+    await Promise.all(toEnrich.map(async (p) => {
+      try {
+        const c = await enrichFromDavidsonCounty(p.address)
+        if (!c.matched) return
+        if (c.owner_name) p.owner_name = c.owner_name
+        if (c.owner_out_of_state != null) {
+          p.owner_out_of_state = c.owner_out_of_state
+          p.owner_occupied = false
+          p.owner_type = deriveOwner(false, c.owner_out_of_state)
+        }
+        if (c.assessed_value && !p.avm_value) p.avm_value = c.assessed_value
+        if (c.last_sale_price) p.last_sale_price = c.last_sale_price
+        if (c.last_sale_year) {
+          p.last_sale_year = c.last_sale_year
+          p.ownership_years = new Date().getFullYear() - c.last_sale_year
+        }
+        p.source = 'county'   // mark records-enriched
+      } catch (e) {
+        console.error('County enrich failed for', p.address, e)
+      }
+    }))
+  }
+  return base
+}
+
+// RentCast: on-market listings + value/rent estimates + price history.
+// NOTE: RentCast does not expose mortgage/lien data, so free-and-clear is
+// UNKNOWN from this source — county records or a paid provider fill it.
 async function fetchFromRentCast(market: string, params: any): Promise<Property[]> {
   const [city, state] = market.split(',').map((s: string) => s.trim())
   const url = new URL('https://api.rentcast.io/v1/listings/sale')
   url.searchParams.set('city', city)
   url.searchParams.set('state', state || 'TN')
   url.searchParams.set('status', 'Active')
-  url.searchParams.set('limit', '50')
+  url.searchParams.set('limit', '100')
+  if (params.max_price) url.searchParams.set('maxPrice', String(params.max_price))
+  if (params.min_beds) url.searchParams.set('bedrooms', String(params.min_beds))
   const res = await fetch(url, { headers: { 'X-Api-Key': RENTCAST_API_KEY! } })
   if (!res.ok) throw new Error(`RentCast ${res.status}`)
   const rows = await res.json()
   const year = new Date().getFullYear()
-  return (rows as any[]).map((r, i) => {
+
+  const props: Property[] = []
+  for (let i = 0; i < (rows as any[]).length; i++) {
+    const r = (rows as any[])[i]
     const listPrice = r.price ?? 0
-    const lastSaleYear = r.history ? year - 8 : year - 8
-    return {
+
+    // Price history → count of downward adjustments + total % off original.
+    let cuts = 0, originalPrice = listPrice
+    const hist = r.history && typeof r.history === 'object' ? Object.values(r.history) as any[] : []
+    const priced = hist.map(h => h?.price).filter((n: any) => typeof n === 'number')
+    for (let j = 1; j < priced.length; j++) if (priced[j] < priced[j - 1]) cuts++
+    if (priced.length) originalPrice = Math.max(...priced)
+    const totalCutPct = originalPrice > 0 ? +(((originalPrice - listPrice) / originalPrice) * 100).toFixed(1) : 0
+
+    props.push({
       external_id: r.id ?? `RC-${i}`, source: 'rentcast', asset_type: 'sfh',
       address: r.formattedAddress ?? r.addressLine1 ?? 'Unknown',
       neighborhood: r.county ?? city, city, state: state || 'TN', zip: r.zipCode ?? '',
       beds: r.bedrooms ?? 0, baths: r.bathrooms ?? 0, sqft: r.squareFootage ?? 0,
       year_built: r.yearBuilt ?? 0, list_price: listPrice,
-      days_on_market: r.daysOnMarket ?? 0, price_cut_count: 0, total_price_cut_pct: 0,
-      status: 'active', avm_value: r.price ?? 0, rent_estimate: Math.round((r.price ?? 0) * 0.005),
-      last_sale_price: Math.round(listPrice * 0.7), last_sale_year: lastSaleYear,
-      ownership_years: year - lastSaleYear, has_open_mortgage: true,
-      mortgage_origination_year: lastSaleYear, mortgage_rate_est: 5.0,
-      est_mortgage_balance: Math.round(listPrice * 0.55),
-      equity: Math.round(listPrice * 0.45), equity_pct: 0.45,
-      owner_occupied: true, owner_out_of_state: false,
-      owner_type: 'owner_occupied', is_vacant: false, distress_flags: [],
+      days_on_market: r.daysOnMarket ?? 0, price_cut_count: cuts,
+      total_price_cut_pct: Math.max(0, totalCutPct),
+      status: cuts > 0 ? 'price_reduced' : 'active',
+      avm_value: 0, rent_estimate: 0,   // filled by AVM enrichment below
+      last_sale_price: 0, last_sale_year: year - 8,
+      ownership_years: 8, has_open_mortgage: true,   // UNKNOWN → conservative; county/paid source corrects
+      mortgage_origination_year: null, mortgage_rate_est: null, est_mortgage_balance: null,
+      equity: 0, equity_pct: 0,
+      owner_occupied: r.ownerOccupied ?? true, owner_out_of_state: false,
+      owner_type: (r.ownerOccupied ?? true) ? 'owner_occupied' : 'absentee_in_state',
+      is_vacant: false, distress_flags: [],
       owner_name: r.owner?.names?.[0] ?? 'Property Owner', owner_phone: null, owner_email: null,
       agent_name: r.listingAgent?.name ?? 'Listing Agent',
-      agent_brokerage: r.listingOffice?.name ?? '', listing_url: '#',
-    }
-  })
+      agent_brokerage: r.listingOffice?.name ?? '', listing_url: r.listingUrl ?? '#',
+    })
+  }
+
+  // Enrich the top N with AVM value + long-term rent estimate.
+  await Promise.all(props.slice(0, ENRICH_LIMIT).map(async (p) => {
+    try {
+      const [val, rent] = await Promise.all([
+        rentcastGet('/avm/value', p.address),
+        rentcastGet('/avm/rent/long-term', p.address),
+      ])
+      p.avm_value = val?.price ?? p.list_price
+      p.rent_estimate = rent?.rent ?? Math.round(p.list_price * 0.005)
+      p.equity = Math.max(0, p.avm_value - (p.est_mortgage_balance ?? 0))
+      p.equity_pct = p.avm_value ? +(p.equity / p.avm_value).toFixed(3) : 0
+    } catch { /* leave AVM/rent as fallback */ }
+  }))
+  // Fallbacks for the un-enriched remainder.
+  for (const p of props) {
+    if (!p.avm_value) p.avm_value = p.list_price
+    if (!p.rent_estimate) p.rent_estimate = Math.round(p.list_price * 0.005)
+    if (!p.equity_pct) { p.equity = Math.round(p.avm_value * 0.3); p.equity_pct = 0.3 }
+  }
+  return props
 }
 
 // Deterministic mock — mirrors src/lib/propertyEngine.ts
