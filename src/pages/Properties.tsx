@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Home, MapPin, Search, Loader2, Copy, Check, ChevronDown, ChevronUp,
   TrendingDown, Clock, Landmark, UserX, AlertTriangle, Sparkles, DollarSign,
-  Filter, Download, Bookmark, BookmarkCheck, Phone, Mail, Building2, X,
+  Filter, Download, Bookmark, BookmarkCheck, Phone, Mail, Building2, X, Workflow,
 } from 'lucide-react'
+import { saveSchedule, newScheduleId } from '../lib/leadStore'
 import {
   runScan, applyFilters, summarize, skipTrace, toCSV,
   QUICK_LISTS, type PropertyScore, type Strategy, type ScanParams,
@@ -228,6 +230,7 @@ function PropertyCard({ s, saved, onToggleSave }: {
 }
 
 export default function Properties() {
+  const navigate = useNavigate()
   const [strategy, setStrategy] = useState<Strategy>('seller_finance')
   const [city, setCity] = useState('Nashville')
   const [stateAbbr, setStateAbbr] = useState('TN')
@@ -298,6 +301,17 @@ export default function Properties() {
     setQuickLists(qs => qs.includes(key) ? qs.filter(k => k !== key) : [...qs, key])
   }
 
+  function automateSearch() {
+    saveSchedule({
+      id: newScheduleId(),
+      name: `${city} ${STRATEGIES.find(s => s.key === strategy)!.label}`,
+      city, state: stateAbbr, strategy, quickLists, maxPrice, minBeds,
+      cadence: 'daily', enabled: true,
+      created_at: new Date().toISOString(), last_run_at: null, runs: 0,
+    })
+    navigate('/app/leads')
+  }
+
   const activeStrat = STRATEGIES.find(s => s.key === strategy)!
 
   return (
@@ -326,6 +340,10 @@ export default function Properties() {
           {running ? <><Loader2 className="w-4 h-4 animate-spin" /> Scanning</> : <><Search className="w-4 h-4" /> Scan market</>}
         </button>
         <div className="flex-1" />
+        <button onClick={automateSearch}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-primary/40 text-sm text-primary hover:bg-primary/5">
+          <Workflow className="w-4 h-4" /> Automate this search
+        </button>
         <button onClick={exportCSV} disabled={results.length === 0}
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm text-foreground hover:border-primary disabled:opacity-50">
           <Download className="w-4 h-4" /> Export CSV

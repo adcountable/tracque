@@ -1,10 +1,11 @@
 import { Outlet, NavLink } from 'react-router-dom'
-import { LayoutDashboard, Building2, Hash, Bot, Search, Globe, BarChart3, Sparkles, Zap, Home, Settings } from 'lucide-react'
+import { LayoutDashboard, Building2, Hash, Bot, Search, Globe, BarChart3, Sparkles, Zap, Home, Workflow, Settings } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 const nav = [
   { to: '/app/dashboard',       icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/app/properties',      icon: Home,            label: 'Deal Finder' },
+  { to: '/app/leads',           icon: Workflow,        label: 'Pipeline' },
   { to: '/app/brands',          icon: Building2,       label: 'Brands' },
   { to: '/app/keywords',        icon: Hash,            label: 'Keywords' },
   { to: '/app/prompts',         icon: Sparkles,        label: 'Prompt Discovery' },

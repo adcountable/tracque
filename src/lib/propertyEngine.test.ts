@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   generateNashvilleProperties, generateProperties, scoreProperty, runScan,
   applyFilters, summarize, computeComps, skipTrace, toCSV, QUICK_LISTS,
+  detectNewLeads, buildDigest, LEAD_STATUSES,
   type ScanParams, type Property,
 } from './propertyEngine'
 
@@ -146,5 +147,36 @@ describe('summary, comps, skip trace, csv', () => {
     const lines = csv.split('\n')
     expect(lines[0]).toContain('address')
     expect(lines).toHaveLength(scores.length + 1)
+  })
+})
+
+describe('lead detection + digest', () => {
+  it('detectNewLeads splits fresh vs seen by external_id', () => {
+    const scores = runScan(baseParams)
+    const seenIds = scores.slice(0, 3).map(s => s.property.external_id)
+    const { fresh, seen } = detectNewLeads(seenIds, scores)
+    expect(seen).toHaveLength(3)
+    expect(fresh).toHaveLength(scores.length - 3)
+    expect(fresh.every(s => !seenIds.includes(s.property.external_id))).toBe(true)
+  })
+
+  it('a second run with all ids seen yields zero fresh leads', () => {
+    const scores = runScan(baseParams)
+    const { fresh } = detectNewLeads(scores.map(s => s.property.external_id), scores)
+    expect(fresh).toHaveLength(0)
+  })
+
+  it('buildDigest counts new/high-fit/free-clear and caps top N', () => {
+    const scores = runScan(baseParams)
+    const d = buildDigest(scores, 5)
+    expect(d.new_count).toBe(scores.length)
+    expect(d.top.length).toBeLessThanOrEqual(5)
+    expect(d.high_fit_count).toBe(scores.filter(s => s.fit_score >= 75).length)
+    // top is sorted by fit desc
+    for (let i = 1; i < d.top.length; i++) expect(d.top[i - 1].fit_score).toBeGreaterThanOrEqual(d.top[i].fit_score)
+  })
+
+  it('exposes a 6-stage pipeline', () => {
+    expect(LEAD_STATUSES.map(s => s.key)).toEqual(['new', 'contacted', 'replied', 'negotiating', 'won', 'dead'])
   })
 })

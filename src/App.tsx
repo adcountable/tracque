@@ -11,6 +11,7 @@ import Recommendations from './pages/Recommendations'
 import SiteAudit from './pages/SiteAudit'
 import Attribution from './pages/Attribution'
 import Properties from './pages/Properties'
+import Leads from './pages/Leads'
 import Settings from './pages/Settings'
 
 export default function App() {
@@ -29,6 +30,7 @@ export default function App() {
         <Route path="site-audit" element={<SiteAudit />} />
         <Route path="attribution" element={<Attribution />} />
         <Route path="properties" element={<Properties />} />
+        <Route path="leads" element={<Leads />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>

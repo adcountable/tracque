@@ -535,6 +535,48 @@ ${params.buyer_name}`
   return { subject, body }
 }
 
+// ── Lead pipeline + automation ─────────────────────────────
+// The funnel is automatable up to the close; these helpers power
+// recurring scans → new-lead detection → digest. The human works the
+// pipeline statuses below by hand (the un-automatable part).
+
+export type LeadStatus = 'new' | 'contacted' | 'replied' | 'negotiating' | 'won' | 'dead'
+
+export const LEAD_STATUSES: { key: LeadStatus; label: string; color: string }[] = [
+  { key: 'new', label: 'New', color: 'bg-blue-50 text-blue-700 border-blue-100' },
+  { key: 'contacted', label: 'Contacted', color: 'bg-violet-50 text-violet-700 border-violet-100' },
+  { key: 'replied', label: 'Replied', color: 'bg-amber-50 text-amber-700 border-amber-100' },
+  { key: 'negotiating', label: 'Negotiating', color: 'bg-orange-50 text-orange-700 border-orange-100' },
+  { key: 'won', label: 'Won', color: 'bg-emerald-50 text-emerald-700 border-emerald-100' },
+  { key: 'dead', label: 'Dead', color: 'bg-slate-100 text-slate-500 border-slate-200' },
+]
+
+// Given the ids already in the funnel, split a fresh scan into new vs seen.
+export function detectNewLeads(seenIds: string[], scores: PropertyScore[]): { fresh: PropertyScore[]; seen: PropertyScore[] } {
+  const seenSet = new Set(seenIds)
+  const fresh: PropertyScore[] = []
+  const seen: PropertyScore[] = []
+  for (const s of scores) (seenSet.has(s.property.external_id) ? seen : fresh).push(s)
+  return { fresh, seen }
+}
+
+export interface Digest {
+  new_count: number
+  high_fit_count: number   // fresh leads with fit_score >= 75
+  free_clear_count: number
+  top: PropertyScore[]     // top fresh leads by fit
+}
+
+export function buildDigest(fresh: PropertyScore[], topN = 5): Digest {
+  const sorted = [...fresh].sort((a, b) => b.fit_score - a.fit_score)
+  return {
+    new_count: fresh.length,
+    high_fit_count: fresh.filter(s => s.fit_score >= 75).length,
+    free_clear_count: fresh.filter(s => !s.property.has_open_mortgage).length,
+    top: sorted.slice(0, topN),
+  }
+}
+
 // ── CSV export ─────────────────────────────────────────────
 
 export function toCSV(scores: PropertyScore[]): string {
