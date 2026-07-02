@@ -48,9 +48,18 @@ create table properties (
   mortgage_origination_year int,
   mortgage_rate_est         numeric,                -- annual %, subto attractiveness
   est_mortgage_balance      numeric,
+  equity                    numeric,                -- avm − balance (avm if free & clear)
+  equity_pct                numeric,                -- 0–1
   owner_occupied            boolean,
   owner_out_of_state        boolean,
-  distress_flags            text[] default '{}',    -- preforeclosure | tax_lien | probate | code_violation
+  owner_type                text,                   -- owner_occupied | absentee_in_state | absentee_out_of_state
+  is_vacant                 boolean default false,
+  distress_flags            text[] default '{}',    -- preforeclosure | tax_lien | probate | code_violation | vacant
+
+  -- owner contact (populated by skip trace; carries TCPA/DNC obligations)
+  owner_name                text,
+  owner_phone               text,
+  owner_email               text,
 
   -- listing contact (outreach targets the agent, not the owner)
   agent_name                text,

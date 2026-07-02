@@ -9,12 +9,13 @@
 //   asset_type: 'sfh' | 'rv_park' | 'mh_park' | 'land' | 'multifamily'
 //   strategy:   'seller_finance' | 'subject_to' | 'rent_instead_of_sell'
 //
-// Phase 1 ships single-family (`sfh`) + `seller_finance` / `subject_to`,
-// scored against realistic Nashville / Davidson County mock data.
+// PropStream-style query layer on top: Quick Lists, rich filters,
+// equity/owner-type/vacancy signals, comps, and portfolio summary.
 // ============================================================
 
 export type AssetType = 'sfh' | 'rv_park' | 'mh_park' | 'land' | 'multifamily'
 export type Strategy = 'seller_finance' | 'subject_to' | 'rent_instead_of_sell'
+export type OwnerType = 'owner_occupied' | 'absentee_in_state' | 'absentee_out_of_state'
 
 export interface Property {
   external_id: string
@@ -36,7 +37,7 @@ export interface Property {
   status: 'active' | 'back_on_market' | 'price_reduced'
   avm_value: number             // estimated market value
   rent_estimate: number         // estimated monthly market rent
-  // ── ownership / public-records signals (Davidson County) ──
+  // ── ownership / public-records signals (county records) ──
   last_sale_price: number
   last_sale_year: number
   ownership_years: number
@@ -44,9 +45,17 @@ export interface Property {
   mortgage_origination_year: number | null
   mortgage_rate_est: number | null   // annual %, for subto attractiveness
   est_mortgage_balance: number | null
+  equity: number                 // avm − balance (avm if free & clear)
+  equity_pct: number             // 0–1
   owner_occupied: boolean
   owner_out_of_state: boolean
-  distress_flags: string[]       // 'preforeclosure' | 'tax_lien' | 'probate' | 'code_violation'
+  owner_type: OwnerType
+  is_vacant: boolean
+  distress_flags: string[]       // 'preforeclosure' | 'tax_lien' | 'probate' | 'code_violation' | 'vacant'
+  // ── owner contact (populated by skip trace) ──
+  owner_name: string
+  owner_phone: string | null
+  owner_email: string | null
   // ── listing contact ──
   agent_name: string
   agent_brokerage: string
@@ -75,6 +84,13 @@ export interface DealMath {
   fits_budget: boolean | null
 }
 
+export interface Comp {
+  address: string
+  sqft: number
+  sale_or_list: number
+  price_per_sqft: number
+}
+
 export interface PropertyScore {
   property: Property
   strategy: Strategy
@@ -83,11 +99,14 @@ export interface PropertyScore {
   signals: ScoreSignal[]
   reasons: string[]          // the human "why"
   deal_math: DealMath
+  comps: { comps: Comp[]; avg_ppsf: number; subject_ppsf: number }
   outreach: { subject: string; body: string }
 }
 
 export interface ScanParams {
   strategy: Strategy
+  city: string
+  state: string
   max_price: number
   min_beds: number
   monthly_budget: number     // buyer's target monthly payment
@@ -121,36 +140,48 @@ const NASHVILLE_NEIGHBORHOODS = [
   { name: 'Whites Creek', zip: '37189', tier: 0.7 },
 ]
 
-const STREETS = ['Riverside Dr', 'Gallatin Pike', 'Dickerson Pike', 'Porter Rd', 'Eastland Ave',
-  'McGavock Pike', 'Trinity Ln', 'Ewing Dr', 'Neelys Bend Rd', 'Anderson Rd', 'Bell Rd',
-  'Old Hickory Blvd', 'Charlotte Ave', 'Clarksville Pike', 'Dupont Ave', 'Larkin Springs Rd']
+// Generic districts for any non-Nashville market (nationwide support).
+const GENERIC_DISTRICTS = [
+  { name: 'Downtown', zip: '00001', tier: 1.2 },
+  { name: 'Northside', zip: '00002', tier: 0.95 },
+  { name: 'Westside', zip: '00003', tier: 1.1 },
+  { name: 'Eastside', zip: '00004', tier: 0.9 },
+  { name: 'Southside', zip: '00005', tier: 0.8 },
+  { name: 'Midtown', zip: '00006', tier: 1.05 },
+  { name: 'Riverside', zip: '00007', tier: 0.85 },
+  { name: 'Heights', zip: '00008', tier: 1.0 },
+]
 
-const BROKERAGES = ['Zeitlin Sotheby\'s', 'Benchmark Realty', 'Keller Williams Nashville',
-  'Compass TN', 'Parks Realty', 'Village Real Estate', 'The Ashton Real Estate Group']
+const STREETS = ['Riverside Dr', 'Main St', 'Oak Ave', 'Porter Rd', 'Eastland Ave',
+  'Maple Ln', 'Elm St', 'Ewing Dr', 'Cedar Rd', 'Anderson Rd', 'Bell Rd',
+  'Highland Blvd', 'Charlotte Ave', 'Franklin Pike', 'Dupont Ave', 'Park Ave']
+
+const BROKERAGES = ['Zeitlin Sotheby\'s', 'Benchmark Realty', 'Keller Williams',
+  'Compass', 'Parks Realty', 'Village Real Estate', 'The Ashton Group']
 
 const FIRST = ['Sarah', 'Mike', 'Angela', 'Derrick', 'Tom', 'Priya', 'Jamal', 'Karen', 'Luis', 'Beth']
 const LAST = ['Whitfield', 'Nguyen', 'Carter', 'Boyd', 'Alvarez', 'Freeman', 'Patel', 'Sullivan', 'Reed', 'Cole']
 
-// ── Nashville-calibrated mock generator ────────────────────
-// Realistic enough to demo the ranking; deterministic by seed.
+// ── Market-parameterized mock generator ────────────────────
+// Realistic enough to demo ranking; deterministic by seed.
 
-export function generateNashvilleProperties(count = 16, seed = 42): Property[] {
+export function generateProperties(city = 'Nashville', state = 'TN', count = 18, seed = 42): Property[] {
   const rnd = mulberry32(seed)
   const pick = <T,>(arr: T[]) => arr[Math.floor(rnd() * arr.length)]
   const between = (lo: number, hi: number) => lo + rnd() * (hi - lo)
   const currentYear = 2026
+  const isNashville = city.toLowerCase().includes('nashville')
+  const hoods = isNashville ? NASHVILLE_NEIGHBORHOODS : GENERIC_DISTRICTS
 
   const props: Property[] = []
   for (let i = 0; i < count; i++) {
-    const hood = pick(NASHVILLE_NEIGHBORHOODS)
+    const hood = pick(hoods)
     const beds = 2 + Math.floor(rnd() * 4)
     const baths = Math.max(1, beds - 1 + Math.round(rnd()))
     const sqft = Math.round(between(950, 2600) * (0.9 + hood.tier * 0.2))
     const yearBuilt = Math.floor(between(1948, 2016))
 
-    // Market value driven by neighborhood tier + size
     const avm = Math.round((160000 + sqft * between(140, 240)) * hood.tier)
-    // List price wanders around AVM; some list below (motivated)
     const listVsAvm = between(0.92, 1.06)
     const listPrice = Math.round((avm * listVsAvm) / 1000) * 1000
 
@@ -160,12 +191,10 @@ export function generateNashvilleProperties(count = 16, seed = 42): Property[] {
 
     const rentEstimate = Math.round((avm * between(0.0045, 0.0062)) / 25) * 25
 
-    // Ownership / records
     const ownershipYears = Math.floor(between(1, 28))
     const lastSaleYear = currentYear - ownershipYears
     const lastSalePrice = Math.round((avm / Math.pow(1.045, ownershipYears)) / 1000) * 1000
 
-    // Free & clear likelier with long tenure
     const freeAndClearChance = ownershipYears >= 12 ? 0.62 : ownershipYears >= 7 ? 0.3 : 0.12
     const hasMortgage = rnd() > freeAndClearChance
     let origYear: number | null = null
@@ -173,34 +202,39 @@ export function generateNashvilleProperties(count = 16, seed = 42): Property[] {
     let balance: number | null = null
     if (hasMortgage) {
       origYear = Math.max(lastSaleYear, currentYear - Math.floor(between(1, 12)))
-      // Rate tracks vintage: 2020–21 refis are the sub-3% golden subto loans
       rateEst = origYear <= 2019 ? +between(3.6, 4.6).toFixed(2)
         : origYear <= 2021 ? +between(2.6, 3.2).toFixed(2)
         : +between(6.1, 7.3).toFixed(2)
       const yearsPaid = currentYear - origYear
       balance = Math.round((lastSalePrice * 0.8 * Math.pow(0.985, yearsPaid)) / 1000) * 1000
     }
+    const equity = Math.max(0, avm - (balance ?? 0))
+    const equityPct = +(equity / avm).toFixed(3)
 
     const ownerOccupied = rnd() > 0.42
     const ownerOutOfState = !ownerOccupied && rnd() > 0.55
+    const ownerType: OwnerType = ownerOccupied ? 'owner_occupied'
+      : ownerOutOfState ? 'absentee_out_of_state' : 'absentee_in_state'
+    const isVacant = !ownerOccupied && rnd() > 0.7
 
     const flags: string[] = []
     if (rnd() > 0.9) flags.push('preforeclosure')
     if (rnd() > 0.88) flags.push('tax_lien')
     if (ownershipYears > 20 && rnd() > 0.8) flags.push('probate')
     if (rnd() > 0.93) flags.push('code_violation')
+    if (isVacant) flags.push('vacant')
 
     const status: Property['status'] = priceCuts > 0 ? 'price_reduced'
       : dom > 120 ? 'back_on_market' : 'active'
 
     props.push({
-      external_id: `NSH-${(seed * 1000 + i).toString(36).toUpperCase()}`,
+      external_id: `${(isNashville ? 'NSH' : city.slice(0, 3).toUpperCase())}-${(seed * 1000 + i).toString(36).toUpperCase()}`,
       source: 'mock',
       asset_type: 'sfh',
       address: `${Math.floor(between(100, 4999))} ${pick(STREETS)}`,
       neighborhood: hood.name,
-      city: 'Nashville',
-      state: 'TN',
+      city,
+      state,
       zip: hood.zip,
       beds,
       baths,
@@ -220,15 +254,147 @@ export function generateNashvilleProperties(count = 16, seed = 42): Property[] {
       mortgage_origination_year: origYear,
       mortgage_rate_est: rateEst,
       est_mortgage_balance: balance,
+      equity,
+      equity_pct: equityPct,
       owner_occupied: ownerOccupied,
       owner_out_of_state: ownerOutOfState,
+      owner_type: ownerType,
+      is_vacant: isVacant,
       distress_flags: flags,
+      owner_name: `${pick(FIRST)} ${pick(LAST)}`,
+      owner_phone: null,   // resolved by skip trace
+      owner_email: null,
       agent_name: `${pick(FIRST)} ${pick(LAST)}`,
       agent_brokerage: pick(BROKERAGES),
       listing_url: '#',
     })
   }
   return props
+}
+
+// Back-compat alias.
+export function generateNashvilleProperties(count = 16, seed = 42): Property[] {
+  return generateProperties('Nashville', 'TN', count, seed)
+}
+
+// ── Quick Lists (one-click PropStream-style presets) ───────
+
+export interface QuickList {
+  key: string
+  label: string
+  desc: string
+  match: (p: Property) => boolean
+}
+
+export const QUICK_LISTS: QuickList[] = [
+  { key: 'preforeclosure', label: 'Pre-Foreclosure', desc: 'Notice of default / lis pendens on record',
+    match: p => p.distress_flags.includes('preforeclosure') },
+  { key: 'high_equity', label: 'High Equity', desc: '≥ 50% equity — room to structure a deal',
+    match: p => p.equity_pct >= 0.5 },
+  { key: 'free_clear', label: 'Free & Clear', desc: 'No mortgage — ideal seller-finance candidate',
+    match: p => !p.has_open_mortgage },
+  { key: 'absentee', label: 'Absentee Owner', desc: 'Owner does not live in the property',
+    match: p => !p.owner_occupied },
+  { key: 'out_of_state', label: 'Out-of-State Owner', desc: 'Owner mailing address in another state',
+    match: p => p.owner_out_of_state },
+  { key: 'tax_lien', label: 'Tax Delinquent', desc: 'Delinquent property taxes on record',
+    match: p => p.distress_flags.includes('tax_lien') },
+  { key: 'vacant', label: 'Vacant', desc: 'Likely vacant property',
+    match: p => p.is_vacant },
+  { key: 'tired_landlord', label: 'Tired Landlord', desc: 'Absentee owner, 10+ yrs, high equity',
+    match: p => !p.owner_occupied && p.ownership_years >= 10 && p.equity_pct >= 0.5 },
+  { key: 'price_reduced', label: 'Price Reduced', desc: 'One or more price cuts',
+    match: p => p.price_cut_count > 0 },
+  { key: 'low_rate', label: 'Low-Rate Loan', desc: 'Sub-4% mortgage — subject-to target',
+    match: p => p.mortgage_rate_est != null && p.mortgage_rate_est < 4 },
+]
+
+// ── Rich filters ───────────────────────────────────────────
+
+export interface PropertyFilters {
+  quickLists: string[]         // OR-combined preset keys
+  minPrice?: number
+  maxPrice?: number
+  minBeds?: number
+  minBaths?: number
+  minSqft?: number
+  minYear?: number
+  minEquityPct?: number        // 0–100 (UI %), converted internally
+  minOwnershipYears?: number
+  ownerType?: OwnerType | 'any'
+  distressFlags?: string[]     // AND: property must include all
+  statuses?: string[]          // OR
+}
+
+export function applyFilters(props: Property[], f: PropertyFilters): Property[] {
+  return props.filter(p => {
+    if (f.minPrice != null && p.list_price < f.minPrice) return false
+    if (f.maxPrice != null && p.list_price > f.maxPrice) return false
+    if (f.minBeds != null && p.beds < f.minBeds) return false
+    if (f.minBaths != null && p.baths < f.minBaths) return false
+    if (f.minSqft != null && p.sqft < f.minSqft) return false
+    if (f.minYear != null && p.year_built < f.minYear) return false
+    if (f.minEquityPct != null && p.equity_pct * 100 < f.minEquityPct) return false
+    if (f.minOwnershipYears != null && p.ownership_years < f.minOwnershipYears) return false
+    if (f.ownerType && f.ownerType !== 'any' && p.owner_type !== f.ownerType) return false
+    if (f.distressFlags?.length && !f.distressFlags.every(flag => p.distress_flags.includes(flag))) return false
+    if (f.statuses?.length && !f.statuses.includes(p.status)) return false
+    if (f.quickLists?.length) {
+      const lists = QUICK_LISTS.filter(q => f.quickLists.includes(q.key))
+      if (!lists.some(q => q.match(p))) return false
+    }
+    return true
+  })
+}
+
+// ── Portfolio summary (stat bar) ───────────────────────────
+
+export interface PortfolioSummary {
+  count: number
+  avg_equity_pct: number
+  free_clear_count: number
+  distressed_count: number
+  avg_dom: number
+  avg_price: number
+}
+
+export function summarize(props: Property[]): PortfolioSummary {
+  if (props.length === 0) return { count: 0, avg_equity_pct: 0, free_clear_count: 0, distressed_count: 0, avg_dom: 0, avg_price: 0 }
+  const n = props.length
+  return {
+    count: n,
+    avg_equity_pct: +(props.reduce((s, p) => s + p.equity_pct, 0) / n * 100).toFixed(0),
+    free_clear_count: props.filter(p => !p.has_open_mortgage).length,
+    distressed_count: props.filter(p => p.distress_flags.length > 0).length,
+    avg_dom: Math.round(props.reduce((s, p) => s + p.days_on_market, 0) / n),
+    avg_price: Math.round(props.reduce((s, p) => s + p.list_price, 0) / n),
+  }
+}
+
+// ── Comps ──────────────────────────────────────────────────
+
+export function computeComps(subject: Property, universe: Property[]): { comps: Comp[]; avg_ppsf: number; subject_ppsf: number } {
+  const comps = universe
+    .filter(p => p.external_id !== subject.external_id && p.neighborhood === subject.neighborhood)
+    .filter(p => Math.abs(p.sqft - subject.sqft) <= 500 && Math.abs(p.beds - subject.beds) <= 1)
+    .slice(0, 4)
+    .map(p => ({ address: p.address, sqft: p.sqft, sale_or_list: p.list_price, price_per_sqft: +(p.list_price / p.sqft).toFixed(0) }))
+  const avg = comps.length ? Math.round(comps.reduce((s, c) => s + c.price_per_sqft, 0) / comps.length) : 0
+  return { comps, avg_ppsf: avg, subject_ppsf: +(subject.list_price / subject.sqft).toFixed(0) }
+}
+
+// ── Skip trace (provider-ready stub) ───────────────────────
+// Production calls a skip-trace provider (BatchData, REISkip, etc.).
+// Deterministic mock so the demo shows resolved contact info.
+
+export function skipTrace(p: Property): { owner_phone: string; owner_email: string } {
+  let h = 0
+  for (const ch of p.external_id) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  const area = 615
+  const line = 1000 + (h % 9000)
+  const prefix = 200 + (h % 800)
+  const handle = p.owner_name.toLowerCase().replace(/[^a-z]/g, '.')
+  return { owner_phone: `(${area}) ${prefix}-${line}`, owner_email: `${handle}@example.com` }
 }
 
 // ── Deal math ──────────────────────────────────────────────
@@ -241,11 +407,10 @@ function amortizedMonthly(principal: number, annualRate: number, years: number):
 }
 
 function computeDealMath(p: Property, strategy: Strategy, budget: number): DealMath {
-  const taxes = (p.avm_value * 0.0065) / 12   // Davidson County ~0.65%/yr effective
+  const taxes = (p.avm_value * 0.0065) / 12
   const insurance = 105
 
   if (strategy === 'subject_to' && p.has_open_mortgage && p.mortgage_rate_est != null && p.est_mortgage_balance != null) {
-    // Take over existing loan; small cash-to-seller assumed separately
     const yearsLeft = Math.max(15, 30 - (2026 - (p.mortgage_origination_year ?? 2026)))
     const pi = amortizedMonthly(p.est_mortgage_balance, p.mortgage_rate_est, yearsLeft)
     const total = pi + taxes + insurance
@@ -259,7 +424,6 @@ function computeDealMath(p: Property, strategy: Strategy, budget: number): DealM
     }
   }
 
-  // seller_finance (default): 10% down, seller carries at a negotiated rate
   const rate = 6.0
   const down = Math.round(p.list_price * 0.1)
   const financed = p.list_price - down
@@ -288,7 +452,7 @@ function sellerFinanceSignals(p: Property): ScoreSignal[] {
       detail: `${p.days_on_market} days on market` },
     { key: 'cuts', label: 'Price reductions', weight: 8, present: p.price_cut_count > 0,
       detail: p.price_cut_count > 0 ? `${p.price_cut_count} cut(s), ${p.total_price_cut_pct}% off` : 'No price cuts' },
-    { key: 'distress', label: 'Public distress flags', weight: 12, present: p.distress_flags.length > 0,
+    { key: 'distress', label: 'Public distress flags', weight: 12, present: p.distress_flags.some(f => f !== 'vacant'),
       detail: p.distress_flags.length ? p.distress_flags.join(', ') : 'None on record' },
   ]
 }
@@ -323,7 +487,7 @@ function motivationScore(p: Property): number {
   return Math.min(100, Math.round(s))
 }
 
-export function scoreProperty(p: Property, params: ScanParams): PropertyScore {
+export function scoreProperty(p: Property, params: ScanParams, universe: Property[] = []): PropertyScore {
   const signals = params.strategy === 'subject_to' ? subjectToSignals(p) : sellerFinanceSignals(p)
   const raw = signals.reduce((sum, s) => sum + (s.present ? s.weight : 0), 0)
   const max = signals.reduce((sum, s) => sum + s.weight, 0)
@@ -332,24 +496,24 @@ export function scoreProperty(p: Property, params: ScanParams): PropertyScore {
   const reasons = signals.filter(s => s.present).map(s => `${s.label} — ${s.detail}`)
   const deal = computeDealMath(p, params.strategy, params.monthly_budget)
   const outreach = draftOutreach(p, params, deal)
+  const comps = computeComps(p, universe)
 
   return {
     property: p, strategy: params.strategy, fit_score: fit,
     motivation_score: motivationScore(p), signals, reasons,
-    deal_math: deal, outreach,
+    deal_math: deal, comps, outreach,
   }
 }
 
 export function runScan(params: ScanParams, seed = 42): PropertyScore[] {
-  return generateNashvilleProperties(18, seed)
+  const universe = generateProperties(params.city, params.state, 24, seed)
+  return universe
     .filter(p => p.list_price <= params.max_price && p.beds >= params.min_beds)
-    .map(p => scoreProperty(p, params))
+    .map(p => scoreProperty(p, params, universe))
     .sort((a, b) => b.fit_score - a.fit_score || b.motivation_score - a.motivation_score)
 }
 
 // ── Outreach templater (agent-directed = low TCPA risk) ────
-// Production path drafts this with Claude via the edge function; this
-// template mirrors the tone so demo output is representative.
 
 export function draftOutreach(p: Property, params: ScanParams, deal: DealMath): { subject: string; body: string } {
   const strat = params.strategy === 'subject_to' ? 'take over the existing financing' : 'a seller-financing structure'
@@ -369,4 +533,26 @@ Happy to put this in writing and provide proof of funds for the down payment. Co
 Thanks,
 ${params.buyer_name}`
   return { subject, body }
+}
+
+// ── CSV export ─────────────────────────────────────────────
+
+export function toCSV(scores: PropertyScore[]): string {
+  const headers = ['address', 'neighborhood', 'city', 'state', 'zip', 'list_price', 'avm_value',
+    'equity_pct', 'beds', 'baths', 'sqft', 'year_built', 'days_on_market', 'owner_type',
+    'ownership_years', 'has_open_mortgage', 'mortgage_rate_est', 'distress_flags', 'fit_score',
+    'motivation_score', 'owner_name', 'owner_phone', 'owner_email']
+  const rows = scores.map(s => {
+    const p = s.property
+    return [p.address, p.neighborhood, p.city, p.state, p.zip, p.list_price, p.avm_value,
+      Math.round(p.equity_pct * 100), p.beds, p.baths, p.sqft, p.year_built, p.days_on_market,
+      p.owner_type, p.ownership_years, p.has_open_mortgage, p.mortgage_rate_est ?? '',
+      p.distress_flags.join('|'), s.fit_score, s.motivation_score, p.owner_name,
+      p.owner_phone ?? '', p.owner_email ?? '']
+      .map(v => {
+        const str = String(v)
+        return str.includes(',') || str.includes('"') ? `"${str.replace(/"/g, '""')}"` : str
+      }).join(',')
+  })
+  return [headers.join(','), ...rows].join('\n')
 }

@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import {
-  generateNashvilleProperties, scoreProperty, runScan, type ScanParams, type Property,
+  generateNashvilleProperties, generateProperties, scoreProperty, runScan,
+  applyFilters, summarize, computeComps, skipTrace, toCSV, QUICK_LISTS,
+  type ScanParams, type Property,
 } from './propertyEngine'
 
 const baseParams: ScanParams = {
-  strategy: 'seller_finance', max_price: 900000, min_beds: 1, monthly_budget: 4000, buyer_name: 'John',
+  strategy: 'seller_finance', city: 'Nashville', state: 'TN',
+  max_price: 900000, min_beds: 1, monthly_budget: 4000, buyer_name: 'John',
 }
 
 describe('generateNashvilleProperties', () => {
@@ -76,5 +79,72 @@ describe('runScan', () => {
     const [top] = runScan(baseParams)
     expect(top.outreach.body).toContain(top.property.address)
     expect(top.outreach.body).toContain('John')
+  })
+})
+
+describe('nationwide generator', () => {
+  it('honors the requested market', () => {
+    const props = generateProperties('Austin', 'TX', 8, 3)
+    expect(props).toHaveLength(8)
+    for (const p of props) { expect(p.city).toBe('Austin'); expect(p.state).toBe('TX') }
+  })
+})
+
+describe('quick lists + filters', () => {
+  const props = generateNashvilleProperties(24, 5)
+
+  it('free_clear quick list only returns free-and-clear properties', () => {
+    const list = applyFilters(props, { quickLists: ['free_clear'] })
+    expect(list.length).toBeGreaterThan(0)
+    expect(list.every(p => !p.has_open_mortgage)).toBe(true)
+  })
+
+  it('high_equity quick list returns only >=50% equity', () => {
+    const list = applyFilters(props, { quickLists: ['high_equity'] })
+    expect(list.every(p => p.equity_pct >= 0.5)).toBe(true)
+  })
+
+  it('rich filters compose (price + beds + owner type)', () => {
+    const list = applyFilters(props, { quickLists: [], maxPrice: 500000, minBeds: 3, ownerType: 'absentee_out_of_state' })
+    expect(list.every(p => p.list_price <= 500000 && p.beds >= 3 && p.owner_type === 'absentee_out_of_state')).toBe(true)
+  })
+
+  it('every quick list has a working matcher', () => {
+    for (const q of QUICK_LISTS) {
+      expect(typeof q.match(props[0])).toBe('boolean')
+    }
+  })
+})
+
+describe('summary, comps, skip trace, csv', () => {
+  it('summarize reports sane aggregates', () => {
+    const props = generateNashvilleProperties(20, 9)
+    const s = summarize(props)
+    expect(s.count).toBe(20)
+    expect(s.avg_equity_pct).toBeGreaterThanOrEqual(0)
+    expect(s.avg_equity_pct).toBeLessThanOrEqual(100)
+    expect(s.free_clear_count).toBeLessThanOrEqual(20)
+  })
+
+  it('computeComps returns same-neighborhood comps and a $/sqft', () => {
+    const props = generateNashvilleProperties(30, 11)
+    const subject = props[0]
+    const { comps, subject_ppsf } = computeComps(subject, props)
+    expect(subject_ppsf).toBeGreaterThan(0)
+    expect(comps.every(c => c.price_per_sqft > 0)).toBe(true)
+  })
+
+  it('skipTrace is deterministic per property', () => {
+    const p = generateNashvilleProperties(1, 1)[0]
+    expect(skipTrace(p)).toEqual(skipTrace(p))
+    expect(skipTrace(p).owner_phone).toMatch(/^\(615\)/)
+  })
+
+  it('toCSV emits a header plus one row per score', () => {
+    const scores = runScan(baseParams)
+    const csv = toCSV(scores)
+    const lines = csv.split('\n')
+    expect(lines[0]).toContain('address')
+    expect(lines).toHaveLength(scores.length + 1)
   })
 })

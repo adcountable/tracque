@@ -30,8 +30,15 @@ interface Property {
   last_sale_price: number; last_sale_year: number; ownership_years: number
   has_open_mortgage: boolean; mortgage_origination_year: number | null
   mortgage_rate_est: number | null; est_mortgage_balance: number | null
-  owner_occupied: boolean; owner_out_of_state: boolean; distress_flags: string[]
+  equity: number; equity_pct: number
+  owner_occupied: boolean; owner_out_of_state: boolean
+  owner_type: string; is_vacant: boolean; distress_flags: string[]
+  owner_name: string; owner_phone: string | null; owner_email: string | null
   agent_name: string; agent_brokerage: string; listing_url: string
+}
+
+function deriveOwner(occupied: boolean, outOfState: boolean): string {
+  return occupied ? 'owner_occupied' : outOfState ? 'absentee_out_of_state' : 'absentee_in_state'
 }
 
 // ── Adapters ───────────────────────────────────────────────
@@ -76,7 +83,10 @@ async function fetchFromRentCast(market: string, params: any): Promise<Property[
       ownership_years: year - lastSaleYear, has_open_mortgage: true,
       mortgage_origination_year: lastSaleYear, mortgage_rate_est: 5.0,
       est_mortgage_balance: Math.round(listPrice * 0.55),
-      owner_occupied: true, owner_out_of_state: false, distress_flags: [],
+      equity: Math.round(listPrice * 0.45), equity_pct: 0.45,
+      owner_occupied: true, owner_out_of_state: false,
+      owner_type: 'owner_occupied', is_vacant: false, distress_flags: [],
+      owner_name: r.owner?.names?.[0] ?? 'Property Owner', owner_phone: null, owner_email: null,
       agent_name: r.listingAgent?.name ?? 'Listing Agent',
       agent_brokerage: r.listingOffice?.name ?? '', listing_url: '#',
     }
@@ -126,10 +136,14 @@ function mockNashville(count: number): Property[] {
       bal = Math.round((salePrice * 0.8 * Math.pow(0.985, yr - oy)) / 1000) * 1000
     }
     const occ = rnd() > 0.42
+    const outOfState = !occ && rnd() > 0.55
+    const vacant = !occ && rnd() > 0.7
+    const equity = Math.max(0, avm - (bal ?? 0))
     const flags: string[] = []
     if (rnd() > 0.9) flags.push('preforeclosure')
     if (rnd() > 0.88) flags.push('tax_lien')
     if (own > 20 && rnd() > 0.8) flags.push('probate')
+    if (vacant) flags.push('vacant')
     out.push({
       external_id: `NSH-${(42000 + i).toString(36).toUpperCase()}`, source: 'mock', asset_type: 'sfh',
       address: `${Math.floor(btw(100, 4999))} ${pick(STREETS)}`, neighborhood: h[0], city: 'Nashville',
@@ -140,7 +154,10 @@ function mockNashville(count: number): Property[] {
       avm_value: avm, rent_estimate: Math.round((avm * btw(0.0045, 0.0062)) / 25) * 25,
       last_sale_price: salePrice, last_sale_year: saleY, ownership_years: own,
       has_open_mortgage: hasM, mortgage_origination_year: oy, mortgage_rate_est: rate, est_mortgage_balance: bal,
-      owner_occupied: occ, owner_out_of_state: !occ && rnd() > 0.55, distress_flags: flags,
+      equity, equity_pct: +(equity / avm).toFixed(3),
+      owner_occupied: occ, owner_out_of_state: outOfState,
+      owner_type: deriveOwner(occ, outOfState), is_vacant: vacant, distress_flags: flags,
+      owner_name: 'Property Owner', owner_phone: null, owner_email: null,
       agent_name: 'Listing Agent', agent_brokerage: 'Nashville Realty', listing_url: '#',
     })
   }
@@ -257,7 +274,10 @@ Deno.serve(async (req) => {
         last_sale_price: s.p.last_sale_price, last_sale_year: s.p.last_sale_year, ownership_years: s.p.ownership_years,
         has_open_mortgage: s.p.has_open_mortgage, mortgage_origination_year: s.p.mortgage_origination_year,
         mortgage_rate_est: s.p.mortgage_rate_est, est_mortgage_balance: s.p.est_mortgage_balance,
-        owner_occupied: s.p.owner_occupied, owner_out_of_state: s.p.owner_out_of_state, distress_flags: s.p.distress_flags,
+        equity: s.p.equity, equity_pct: s.p.equity_pct,
+        owner_occupied: s.p.owner_occupied, owner_out_of_state: s.p.owner_out_of_state,
+        owner_type: s.p.owner_type, is_vacant: s.p.is_vacant, distress_flags: s.p.distress_flags,
+        owner_name: s.p.owner_name, owner_phone: s.p.owner_phone, owner_email: s.p.owner_email,
         agent_name: s.p.agent_name, agent_brokerage: s.p.agent_brokerage, listing_url: s.p.listing_url,
       }, { onConflict: 'user_id,source,external_id' }).select().single()
 
