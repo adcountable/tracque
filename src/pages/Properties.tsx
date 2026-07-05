@@ -7,10 +7,12 @@ import {
 } from 'lucide-react'
 import { saveSchedule, newScheduleId } from '../lib/leadStore'
 import {
-  runScan, applyFilters, summarize, skipTrace, toCSV,
+  runScan, applyFilters, summarize, skipTrace, toCSV, computeComps,
   QUICK_LISTS, type PropertyScore, type Strategy, type ScanParams,
   type PropertyFilters, type OwnerType,
 } from '../lib/propertyEngine'
+import { supabase } from '../integrations/supabase/client'
+import { USER_ID } from '../lib/hooks'
 
 const STRATEGIES: { key: Strategy; label: string; blurb: string }[] = [
   { key: 'seller_finance', label: 'Seller Finance', blurb: 'Owner carries the note — best for free-and-clear owners' },
@@ -259,9 +261,17 @@ export default function Properties() {
     strategy, city, state: stateAbbr, max_price: 5_000_000, min_beds: 0, monthly_budget: budget, buyer_name: buyerName,
   }), [strategy, city, stateAbbr, budget, buyerName])
 
+  // Live mode: when a Supabase project is configured, "Scan market" hits the
+  // deployed scan-properties function (RentCast + county records). Otherwise
+  // the demo engine runs fully client-side.
+  const LIVE = Boolean(import.meta.env.VITE_SUPABASE_URL)
+  const [liveScores, setLiveScores] = useState<PropertyScore[] | null>(null)
+  const [liveError, setLiveError] = useState<string | null>(null)
+
   // Full scan (broad), then rich filters applied client-side. Memoized so
   // expanding cards / saving to lists doesn't re-run scan + filters.
-  const allScores = useMemo(() => runScan(params, seed), [params, seed])
+  const demoScores = useMemo(() => runScan(params, seed), [params, seed])
+  const allScores = liveScores ?? demoScores
   const { results, summary } = useMemo(() => {
     const filters: PropertyFilters = {
       quickLists, maxPrice, minBeds, minBaths: minBaths || undefined,
@@ -273,9 +283,40 @@ export default function Properties() {
     return { results, summary: summarize(results.map(s => s.property)) }
   }, [allScores, quickLists, maxPrice, minBeds, minBaths, minEquityPct, minOwnershipYears, ownerType])
 
-  function handleScan() {
+  async function handleScan() {
     setRunning(true)
-    setTimeout(() => { setSeed(s => s + 1); setRunning(false) }, 650)
+    setLiveError(null)
+    if (!LIVE) {
+      setTimeout(() => { setSeed(s => s + 1); setRunning(false) }, 650)
+      return
+    }
+    try {
+      const { data, error } = await supabase.functions.invoke('scan-properties', {
+        body: {
+          user_id: USER_ID, market: `${city}, ${stateAbbr}`, strategy,
+          params: { max_price: 5_000_000, min_beds: 0, monthly_budget: budget, buyer_name: buyerName },
+        },
+      })
+      if (error) throw error
+      const props = (data?.results ?? []) as (PropertyScore['property'] & {
+        fit_score: number; motivation_score: number; reasons: string[]
+        deal_math: PropertyScore['deal_math']; outreach: PropertyScore['outreach']
+        signals: PropertyScore['signals']
+      })[]
+      const universe = props.map(({ fit_score: _f, motivation_score: _m, reasons: _r, deal_math: _d, outreach: _o, signals: _s, ...p }) => p)
+      setLiveScores(props.map(r => {
+        const { fit_score, motivation_score, reasons, deal_math, outreach, signals, ...property } = r
+        return {
+          property, strategy, fit_score, motivation_score, signals, reasons,
+          deal_math, outreach, comps: computeComps(property, universe),
+        }
+      }))
+    } catch (e) {
+      setLiveError(`Live scan failed (${e instanceof Error ? e.message : String(e)}) — showing demo data.`)
+      setLiveScores(null)
+    } finally {
+      setRunning(false)
+    }
   }
 
   function toggleSave(id: string) {
@@ -321,11 +362,16 @@ export default function Properties() {
       <div className="flex items-center gap-2 mb-1">
         <Home className="w-5 h-5 text-primary" />
         <h1 className="text-xl font-bold text-foreground">Deal Finder</h1>
-        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-100">Demo data</span>
+        {liveScores
+          ? <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">Live data</span>
+          : <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-100">{LIVE ? 'Demo — scan to go live' : 'Demo data'}</span>}
       </div>
       <p className="text-sm text-muted-foreground mb-4">
-        PropStream-style search for creative-finance deals. Signals from listing + county public records (mocked in demo).
+        PropStream-style search for creative-finance deals. Signals from listing + county public records{liveScores ? '' : ' (mocked in demo)'}.
       </p>
+      {liveError && (
+        <div className="mb-4 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{liveError}</div>
+      )}
 
       {/* Market + strategy */}
       <div className="flex flex-wrap items-end gap-2 mb-4">

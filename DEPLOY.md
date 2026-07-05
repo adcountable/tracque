@@ -28,6 +28,7 @@ supabase db push           # applies migrations 001–008
 supabase functions deploy scan-properties
 supabase functions deploy run-scheduled-scans
 supabase functions deploy daily-digest
+supabase functions deploy sweep-county     # off-market leads, FREE + keyless
 
 # Real listings + AVM + rent:
 supabase secrets set RENTCAST_API_KEY=<your_rentcast_key>
@@ -49,6 +50,21 @@ supabase secrets set RENTCAST_API_KEY=<your_rentcast_key>
 Expected: JSON with `"source": "rentcast"` (or `"mock"` if no key) and a
 ranked `results` array. If `source` is `mock` with a key set, check the
 secret name and redeploy the function.
+
+## 4b. Off-market county sweep (FREE — no API key at all)
+
+Scores every residential Davidson County parcel for off-market
+seller-finance potential (out-of-state owners, 15–25+ yr tenure,
+target value band, entity-owned). Leads exist before a listing does.
+
+```bash
+curl -X POST "https://<ref>.supabase.co/functions/v1/sweep-county" \
+  -H "Authorization: Bearer <SERVICE_ROLE_KEY>" -H "Content-Type: application/json" \
+  -d '{"user_id":"demo-user","zip":"37216","max_parcels":5000,"min_fit":50}'
+```
+
+Returns the top off-market candidates with owner names and the "why";
+everything also lands in `properties` / `property_scores` for querying.
 
 ## 5. Frontend (~4 min)
 
