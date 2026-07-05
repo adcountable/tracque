@@ -84,20 +84,25 @@ Deno.serve(async (req) => {
     const seen = new Set((existing ?? []).map((l: any) => l.external_id))
     const fresh = results.filter(p => !seen.has(p.external_id))
 
+    // Batch: one insert for all fresh leads, one for their created-events.
     let added = 0
-    for (const p of fresh) {
-      const trace = skipTrace(p.external_id, p.owner_name)
-      const { data: lead } = await supabase.from('leads').insert({
-        user_id: s.user_id, schedule_id: s.id, external_id: p.external_id,
-        address: p.address, city: p.city, state: p.state, neighborhood: p.neighborhood,
-        strategy: s.strategy, fit_score: p.fit_score, list_price: p.list_price,
-        equity_pct: p.equity_pct, has_open_mortgage: p.has_open_mortgage,
-        owner_name: p.owner_name, owner_phone: trace.phone, owner_email: trace.email,
-        status: 'new', outreach_subject: p.outreach?.subject, outreach_body: p.outreach?.body,
-      }).select().single()
-      if (lead) {
-        await supabase.from('lead_events').insert({ lead_id: lead.id, type: 'created', note: `via schedule ${s.name}` })
-        added++
+    if (fresh.length) {
+      const { data: inserted } = await supabase.from('leads').insert(fresh.map(p => {
+        const trace = skipTrace(p.external_id, p.owner_name)
+        return {
+          user_id: s.user_id, schedule_id: s.id, external_id: p.external_id,
+          address: p.address, city: p.city, state: p.state, neighborhood: p.neighborhood,
+          strategy: s.strategy, fit_score: p.fit_score, list_price: p.list_price,
+          equity_pct: p.equity_pct, has_open_mortgage: p.has_open_mortgage,
+          owner_name: p.owner_name, owner_phone: trace.phone, owner_email: trace.email,
+          status: 'new', outreach_subject: p.outreach?.subject, outreach_body: p.outreach?.body,
+        }
+      })).select('id')
+      added = inserted?.length ?? 0
+      if (inserted?.length) {
+        await supabase.from('lead_events').insert(inserted.map((l: any) => ({
+          lead_id: l.id, type: 'created', note: `via schedule ${s.name}`,
+        })))
       }
     }
 

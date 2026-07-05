@@ -375,9 +375,9 @@ Deno.serve(async (req) => {
       }
     }).sort((a, b) => b.fit - a.fit || b.motivation - a.motivation)
 
-    // Persist properties + scores
-    for (const s of scored) {
-      const { data: prop } = await supabase.from('properties').upsert({
+    // Persist in 4 batched calls instead of 3 per property.
+    const { data: props } = await supabase.from('properties').upsert(
+      scored.map(s => ({
         user_id, external_id: s.p.external_id, source: s.p.source, asset_type: s.p.asset_type,
         address: s.p.address, neighborhood: s.p.neighborhood, city: s.p.city, state: s.p.state, zip: s.p.zip,
         beds: s.p.beds, baths: s.p.baths, sqft: s.p.sqft, year_built: s.p.year_built,
@@ -392,17 +392,30 @@ Deno.serve(async (req) => {
         owner_type: s.p.owner_type, is_vacant: s.p.is_vacant, distress_flags: s.p.distress_flags,
         owner_name: s.p.owner_name, owner_phone: s.p.owner_phone, owner_email: s.p.owner_email,
         agent_name: s.p.agent_name, agent_brokerage: s.p.agent_brokerage, listing_url: s.p.listing_url,
-      }, { onConflict: 'user_id,source,external_id' }).select().single()
+      })),
+      { onConflict: 'user_id,source,external_id' },
+    ).select('id, external_id')
 
-      if (prop) {
-        await supabase.from('property_scores').insert({
-          scan_id: scan!.id, property_id: prop.id, strategy, fit_score: s.fit,
-          motivation_score: s.motivation, signals: s.signals, reasons: s.reasons, deal_math: s.deal,
-        })
-        await supabase.from('property_outreach').insert({
-          user_id, property_id: prop.id, strategy, channel: 'agent_email',
+    const idByExternal = new Map((props ?? []).map((p: any) => [p.external_id, p.id]))
+    const withId = scored.filter(s => idByExternal.has(s.p.external_id))
+
+    if (withId.length) {
+      await supabase.from('property_scores').insert(withId.map(s => ({
+        scan_id: scan!.id, property_id: idByExternal.get(s.p.external_id), strategy, fit_score: s.fit,
+        motivation_score: s.motivation, signals: s.signals, reasons: s.reasons, deal_math: s.deal,
+      })))
+
+      // Outreach: only draft for properties without an existing draft for
+      // this strategy — re-scans must not pile up duplicate drafts.
+      const { data: existingOutreach } = await supabase.from('property_outreach')
+        .select('property_id').eq('user_id', user_id).eq('strategy', strategy)
+      const hasDraft = new Set((existingOutreach ?? []).map((o: any) => o.property_id))
+      const newDrafts = withId.filter(s => !hasDraft.has(idByExternal.get(s.p.external_id)))
+      if (newDrafts.length) {
+        await supabase.from('property_outreach').insert(newDrafts.map(s => ({
+          user_id, property_id: idByExternal.get(s.p.external_id), strategy, channel: 'agent_email',
           subject: s.outreach.subject, body: s.outreach.body,
-        })
+        })))
       }
     }
 

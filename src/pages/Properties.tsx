@@ -259,17 +259,19 @@ export default function Properties() {
     strategy, city, state: stateAbbr, max_price: 5_000_000, min_beds: 0, monthly_budget: budget, buyer_name: buyerName,
   }), [strategy, city, stateAbbr, budget, buyerName])
 
-  // Full scan (broad), then rich filters applied client-side.
+  // Full scan (broad), then rich filters applied client-side. Memoized so
+  // expanding cards / saving to lists doesn't re-run scan + filters.
   const allScores = useMemo(() => runScan(params, seed), [params, seed])
-  const filters: PropertyFilters = {
-    quickLists, maxPrice, minBeds, minBaths: minBaths || undefined,
-    minEquityPct: minEquityPct || undefined, minOwnershipYears: minOwnershipYears || undefined,
-    ownerType,
-  }
-  const filteredProps = applyFilters(allScores.map(s => s.property), filters)
-  const filteredIds = new Set(filteredProps.map(p => p.external_id))
-  const results = allScores.filter(s => filteredIds.has(s.property.external_id))
-  const summary = summarize(results.map(s => s.property))
+  const { results, summary } = useMemo(() => {
+    const filters: PropertyFilters = {
+      quickLists, maxPrice, minBeds, minBaths: minBaths || undefined,
+      minEquityPct: minEquityPct || undefined, minOwnershipYears: minOwnershipYears || undefined,
+      ownerType,
+    }
+    const filteredIds = new Set(applyFilters(allScores.map(s => s.property), filters).map(p => p.external_id))
+    const results = allScores.filter(s => filteredIds.has(s.property.external_id))
+    return { results, summary: summarize(results.map(s => s.property)) }
+  }, [allScores, quickLists, maxPrice, minBeds, minBaths, minEquityPct, minOwnershipYears, ownerType])
 
   function handleScan() {
     setRunning(true)
