@@ -325,7 +325,7 @@ function dealMath(p: Property, strategy: Strategy, budget: number) {
     const total = pi + taxes + insurance
     return { strategy, down_payment: Math.round(p.list_price - p.est_mortgage_balance), financed_amount: p.est_mortgage_balance, interest_rate: p.mortgage_rate_est, term_years: yearsLeft, monthly_pi: Math.round(pi), monthly_taxes: Math.round(taxes), monthly_insurance: insurance, monthly_total: Math.round(total), vs_rent_estimate: Math.round(total - p.rent_estimate), fits_budget: budget > 0 ? total <= budget : null }
   }
-  const rate = 6.0, down = Math.round(p.list_price * 0.1), financed = p.list_price - down
+  const rate = 6.0, down = Math.round(p.list_price * 0.15), financed = p.list_price - down  // ~15% down (2025 residential seller-finance ≈76% LTV)
   const pi = amort(financed, rate, 30), total = pi + taxes + insurance
   return { strategy, down_payment: down, financed_amount: financed, interest_rate: rate, term_years: 30, monthly_pi: Math.round(pi), monthly_taxes: Math.round(taxes), monthly_insurance: insurance, monthly_total: Math.round(total), vs_rent_estimate: Math.round(total - p.rent_estimate), fits_budget: budget > 0 ? total <= budget : null }
 }

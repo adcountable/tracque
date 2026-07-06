@@ -424,8 +424,11 @@ function computeDealMath(p: Property, strategy: Strategy, budget: number): DealM
     }
   }
 
+  // Down defaults to 15% — negotiable, but grounded in market reality:
+  // 2025 recorded residential seller-financed notes averaged ~76% LTV
+  // (~24% down). 10% understated the monthly payment.
   const rate = 6.0
-  const down = Math.round(p.list_price * 0.1)
+  const down = Math.round(p.list_price * 0.15)
   const financed = p.list_price - down
   const pi = amortizedMonthly(financed, rate, 30)
   const total = pi + taxes + insurance
