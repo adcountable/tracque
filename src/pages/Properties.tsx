@@ -349,7 +349,7 @@ export default function Properties() {
       id: newScheduleId(),
       name: `${city} ${STRATEGIES.find(s => s.key === strategy)!.label}`,
       city, state: stateAbbr, strategy, quickLists, maxPrice, minBeds,
-      cadence: 'daily', enabled: true,
+      cadence: 'daily', enabled: true, auto_send: false,
       created_at: new Date().toISOString(), last_run_at: null, runs: 0,
     })
     navigate('/app/leads')

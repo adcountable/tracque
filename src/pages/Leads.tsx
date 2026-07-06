@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Workflow, Play, Plus, Trash2, Clock, Zap, Bell, Phone, Mail, Copy, Check,
-  Power, PowerOff, TrendingUp, Landmark,
+  Power, PowerOff, TrendingUp, Landmark, Send, Settings2, ShieldCheck, Ban, AlertTriangle,
 } from 'lucide-react'
 import {
   runScan, applyFilters, detectNewLeads, buildDigest, skipTrace,
@@ -10,9 +10,17 @@ import {
 } from '../lib/propertyEngine'
 import {
   getSchedules, saveSchedule, deleteSchedule, newScheduleId,
-  getLeads, updateLeadStatus, enrichLead, ingestLeads,
+  getLeads, updateLeadStatus, enrichLead, ingestLeads, markLeadSent,
+  getSettings, saveSettings, getSuppressions, addSuppression,
   type Schedule, type Lead,
 } from '../lib/leadStore'
+import {
+  settingsGaps, ownerOutreach, buildEmail, type OutreachSettings,
+} from '../lib/outreach'
+import { supabase } from '../integrations/supabase/client'
+import { USER_ID } from '../lib/hooks'
+
+const LIVE = Boolean(import.meta.env.VITE_SUPABASE_URL)
 
 const money = (n: number) => '$' + Math.round(n).toLocaleString()
 const STRATEGY_LABEL: Record<Strategy, string> = {
@@ -36,6 +44,14 @@ export default function Leads() {
   const [statusFilter, setStatusFilter] = useState<LeadStatus | 'all'>('all')
   const [runningId, setRunningId] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
+  const [autoSend, setAutoSend] = useState(false)
+
+  // Outreach compliance settings + suppression
+  const [settings, setSettings] = useState<OutreachSettings>(getSettings())
+  const [suppressions, setSuppressions] = useState<string[]>([])
+  const [showSettings, setShowSettings] = useState(false)
+  const [sendMsg, setSendMsg] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
 
   // New-schedule form
   const [name, setName] = useState('Nashville seller-finance')
@@ -47,16 +63,61 @@ export default function Leads() {
   const [minBeds, setMinBeds] = useState(3)
   const [quickLists, setQuickLists] = useState<string[]>(['free_clear', 'high_equity'])
 
-  useEffect(() => { setSchedules(getSchedules()); setLeads(getLeads()) }, [])
+  useEffect(() => { setSchedules(getSchedules()); setLeads(getLeads()); setSuppressions(getSuppressions()) }, [])
+
+  const gaps = settingsGaps(settings)
+  const canSend = gaps.length === 0
 
   function createSchedule() {
     const s: Schedule = {
       id: newScheduleId(), name, city, state: stateAbbr, strategy, quickLists,
-      maxPrice, minBeds, cadence, enabled: true,
+      maxPrice, minBeds, cadence, enabled: true, auto_send: autoSend,
       created_at: new Date().toISOString(), last_run_at: null, runs: 0,
     }
     setSchedules(saveSchedule(s))
     setShowForm(false)
+  }
+
+  function persistSettings(next: OutreachSettings) { setSettings(next); saveSettings(next) }
+
+  // Send owner outreach for the given leads. Live when deployed (Resend via
+  // send-outreach), simulated locally otherwise. Compliance-gated either way.
+  async function sendLeads(targets: Lead[], viaAuto = false): Promise<number> {
+    const eligible = targets.filter(l => !l.sent_at && l.owner_email)
+    if (!eligible.length) { if (!viaAuto) setSendMsg('Nothing to send — leads need an owner email (skip trace first).'); return 0 }
+    if (!canSend) { setShowSettings(true); setSendMsg(`Add ${gaps.join(', ')} before sending.`); return 0 }
+    setSending(true)
+    let sent = 0
+    try {
+      if (LIVE) {
+        const { data, error } = await supabase.functions.invoke('send-outreach', {
+          body: { user_id: USER_ID, lead_ids: eligible.map(l => l.external_id), dry_run: settings.dry_run },
+        })
+        if (error) throw error
+        sent = data?.sent ?? 0
+        setSendMsg(settings.dry_run ? `Dry run: ${data?.processed ?? 0} previewed, 0 actually sent.` : `Sent ${sent} of ${data?.processed ?? 0}.`)
+      } else {
+        // Local simulation mirrors the server's compliance checks.
+        let updated = getLeads()
+        for (const l of eligible.slice(0, settings.daily_cap)) {
+          const built = buildEmail(
+            { external_id: l.external_id, owner_email: l.owner_email, outreach_subject: '', outreach_body: '' },
+            'owner_email', settings, suppressions,
+          )
+          if ('skip' in built) continue
+          if (!settings.dry_run) { updated = markLeadSent(l.external_id, 'owner_email'); sent++ }
+        }
+        setLeads(updated)
+        setSendMsg(settings.dry_run
+          ? `Dry run: ${eligible.length} previewed (toggle off Dry run to send for real).`
+          : `Sent ${sent} owner email${sent === 1 ? '' : 's'} (simulated locally — deploy + set RESEND_API_KEY to send for real).`)
+      }
+    } catch (e) {
+      setSendMsg(`Send failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setSending(false)
+    }
+    return sent
   }
 
   // The automated pass: scan → filter → auto skip-trace fresh → detect new → ingest → digest.
@@ -86,8 +147,15 @@ export default function Leads() {
       setSchedules(saveSchedule({ ...s, last_run_at: new Date().toISOString(), runs: s.runs + 1 }))
       setDigest({ ...buildDigest(enriched), schedule: s.name })
       setRunningId(null)
+      // Auto-send owner outreach on the fresh leads if the schedule opts in.
+      if (s.auto_send && canSend) {
+        const freshLeads = updated.filter(l => enriched.some(e => e.property.external_id === l.external_id))
+        void sendLeads(freshLeads, true)
+      }
     }, 700)
   }
+
+  function toggleAutoSend(s: Schedule) { setSchedules(saveSchedule({ ...s, auto_send: !s.auto_send })) }
 
   function toggleEnabled(s: Schedule) { setSchedules(saveSchedule({ ...s, enabled: !s.enabled })) }
   function removeSchedule(id: string) { setSchedules(deleteSchedule(id)) }
@@ -135,6 +203,55 @@ export default function Leads() {
           {digest.new_count === 0 && <div className="text-sm text-muted-foreground">No new leads this run — all matches already in your pipeline.</div>}
         </div>
       )}
+
+      {/* Outreach settings / compliance */}
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Outreach</h2>
+        <button onClick={() => setShowSettings(s => !s)} className="text-xs inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-border hover:border-primary hover:text-primary text-muted-foreground">
+          <Settings2 className="w-3.5 h-3.5" /> {showSettings ? 'Hide' : 'Settings'}
+        </button>
+      </div>
+      <div className="mb-4">
+        <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg border ${canSend ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-amber-50 text-amber-700 border-amber-100'}`}>
+          {canSend ? <ShieldCheck className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+          {canSend
+            ? <span>Ready to send. {settings.dry_run ? 'Dry run is ON — nothing actually goes out.' : 'Dry run OFF — sends are live.'} {LIVE ? '' : 'Local demo (deploy + RESEND_API_KEY to send for real).'}</span>
+            : <span>Not send-ready — add {gaps.join(', ')} in Settings.</span>}
+        </div>
+        {sendMsg && <div className="mt-2 text-xs text-muted-foreground px-3">{sendMsg}</div>}
+
+        {showSettings && (
+          <div className="bg-card rounded-xl border border-border p-4 mt-3 space-y-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <label className="text-xs text-muted-foreground">From name
+                <input value={settings.from_name} onChange={e => persistSettings({ ...settings, from_name: e.target.value })} className="mt-1 w-full px-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground" placeholder="John Buyer" />
+              </label>
+              <label className="text-xs text-muted-foreground">From email (verified sender)
+                <input value={settings.from_email} onChange={e => persistSettings({ ...settings, from_email: e.target.value })} className="mt-1 w-full px-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground" placeholder="john@yourdomain.com" />
+              </label>
+              <label className="text-xs text-muted-foreground">Reply-to
+                <input value={settings.reply_to} onChange={e => persistSettings({ ...settings, reply_to: e.target.value })} className="mt-1 w-full px-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground" placeholder="john@yourdomain.com" />
+              </label>
+              <label className="text-xs text-muted-foreground col-span-2 sm:col-span-2">Physical mailing address (required by CAN-SPAM)
+                <input value={settings.physical_address} onChange={e => persistSettings({ ...settings, physical_address: e.target.value })} className="mt-1 w-full px-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground" placeholder="123 Main St, Nashville, TN 37206" />
+              </label>
+              <label className="text-xs text-muted-foreground">Daily cap
+                <input type="number" value={settings.daily_cap} onChange={e => persistSettings({ ...settings, daily_cap: +e.target.value })} className="mt-1 w-full px-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground" />
+              </label>
+              <label className="text-xs text-muted-foreground col-span-2 sm:col-span-3">Signature
+                <input value={settings.signature} onChange={e => persistSettings({ ...settings, signature: e.target.value })} className="mt-1 w-full px-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground" placeholder="John · (615) 555-1234" />
+              </label>
+            </div>
+            <label className="flex items-center gap-2 text-xs text-foreground">
+              <input type="checkbox" checked={settings.dry_run} onChange={e => persistSettings({ ...settings, dry_run: e.target.checked })} />
+              <span><strong>Dry run</strong> — preview only, never actually send (recommended until you've reviewed the copy)</span>
+            </label>
+            <div className="text-[11px] text-muted-foreground border-t border-border pt-2">
+              Automated outreach here is <strong>owner-directed email</strong> (CAN-SPAM: real address + unsubscribe on every message; suppression honored). Owner phone/SMS and cold calling carry TCPA/DNC obligations and are intentionally not automated. {suppressions.length} suppressed address(es).
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Schedules */}
       <div className="flex items-center justify-between mb-2">
@@ -186,6 +303,10 @@ export default function Leads() {
               ))}
             </div>
           </div>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input type="checkbox" checked={autoSend} onChange={e => setAutoSend(e.target.checked)} />
+            Auto-send owner outreach on new leads {canSend ? '' : '(configure outreach settings first)'}
+          </label>
           <button onClick={createSchedule} className="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90">Create schedule</button>
         </div>
       )}
@@ -204,6 +325,11 @@ export default function Leads() {
                 {' · '}<Clock className="w-3 h-3 inline" /> {s.last_run_at ? `last run ${new Date(s.last_run_at).toLocaleString()}` : 'never run'} · {s.runs} runs
               </div>
             </div>
+            <button onClick={() => toggleAutoSend(s)}
+              className={`text-[11px] inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border ${s.auto_send ? 'bg-primary/10 text-primary border-primary/40' : 'border-border text-muted-foreground hover:text-foreground'}`}
+              title="Auto-send owner outreach on new leads from this schedule">
+              <Send className="w-3 h-3" /> Auto-send {s.auto_send ? 'on' : 'off'}
+            </button>
             <button onClick={() => runNow(s)} disabled={runningId === s.id} className="text-xs inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-60">
               {runningId === s.id ? <><Zap className="w-3.5 h-3.5 animate-pulse" /> Running</> : <><Play className="w-3.5 h-3.5" /> Run now</>}
             </button>
@@ -218,7 +344,15 @@ export default function Leads() {
       </div>
 
       {/* Pipeline */}
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2">Pipeline</h2>
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Pipeline</h2>
+        <button
+          onClick={() => sendLeads(leads.filter(l => l.status === 'new' && !l.sent_at && l.owner_email))}
+          disabled={sending}
+          className="text-xs inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-60">
+          <Send className="w-3.5 h-3.5" /> {sending ? 'Sending…' : 'Send all new'}
+        </button>
+      </div>
       <div className="flex flex-wrap gap-1.5 mb-3">
         <button onClick={() => setStatusFilter('all')} className={`text-xs px-2.5 py-1 rounded-full border ${statusFilter === 'all' ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-muted-foreground border-border'}`}>
           All ({counts.all})
@@ -253,7 +387,15 @@ export default function Leads() {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <CopyButton text={`Subject: ${l.outreach_subject}\n\n${l.outreach_body}`} />
+                {(() => { const m = ownerOutreach(l); return <CopyButton text={`Subject: ${m.subject}\n\n${m.body}`} /> })()}
+                {l.sent_at
+                  ? <span className="text-[11px] inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100"><Check className="w-3 h-3" /> Sent</span>
+                  : <button onClick={() => sendLeads([l])} disabled={sending || !l.owner_email}
+                      title={l.owner_email ? 'Send owner outreach' : 'Skip trace first'}
+                      className="text-[11px] inline-flex items-center gap-1 px-2 py-1.5 rounded-lg border border-primary/40 text-primary hover:bg-primary/5 disabled:opacity-50">
+                      <Send className="w-3 h-3" /> Send
+                    </button>}
+                {l.owner_email && <button onClick={() => { setSuppressions(addSuppression(l.owner_email!)); setSendMsg(`Suppressed ${l.owner_email}`) }} title="Do not contact" className="p-1.5 rounded-lg border border-border text-muted-foreground hover:text-red-500"><Ban className="w-3.5 h-3.5" /></button>}
                 <select value={l.status} onChange={e => setStatus(l.external_id, e.target.value as LeadStatus)}
                   className="text-xs px-2 py-1.5 rounded-lg border border-border bg-background text-foreground">
                   {LEAD_STATUSES.map(st => <option key={st.key} value={st.key}>{st.label}</option>)}

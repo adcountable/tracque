@@ -29,6 +29,13 @@ supabase functions deploy scan-properties
 supabase functions deploy run-scheduled-scans
 supabase functions deploy daily-digest
 supabase functions deploy sweep-county     # off-market leads, FREE + keyless
+supabase functions deploy send-outreach     # automated owner email
+
+# Automated outreach (owner-directed email via Resend):
+# supabase secrets set RESEND_API_KEY=<key>   # resend.com free tier
+# Then in the app: Pipeline → Outreach → Settings (From name/email +
+# physical address are required by CAN-SPAM). Keep Dry run ON until you've
+# reviewed the copy; toggle a schedule's "Auto-send" to send on new leads.
 
 # Real listings + AVM + rent:
 supabase secrets set RENTCAST_API_KEY=<your_rentcast_key>

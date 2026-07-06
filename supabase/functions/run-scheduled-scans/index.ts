@@ -111,7 +111,25 @@ Deno.serve(async (req) => {
       last_run_at: now.toISOString(), next_run_at: nextRun(s.cadence, now), runs: (s.runs ?? 0) + 1,
     }).eq('id', s.id)
 
-    summary.push({ schedule: s.name, scanned: results.length, new_leads: added })
+    // Optional auto-send: hand fresh leads to send-outreach (owner-directed,
+    // compliance-gated there). Fire-and-forget so a send failure can't fail
+    // the scan; send-outreach honors dry_run + suppression + settings gaps.
+    let auto_sent = 0
+    if (s.auto_send && added > 0) {
+      try {
+        const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-outreach`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SERVICE_KEY}` },
+          body: JSON.stringify({ user_id: s.user_id }),
+        })
+        const sj = await sendRes.json().catch(() => ({}))
+        auto_sent = sj?.sent ?? 0
+      } catch (e) {
+        console.error('auto-send failed:', e)
+      }
+    }
+
+    summary.push({ schedule: s.name, scanned: results.length, new_leads: added, auto_sent })
   }
 
   return new Response(JSON.stringify({ ran: schedules.length, summary }),
