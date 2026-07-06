@@ -1,8 +1,5 @@
 import { Outlet, NavLink } from 'react-router-dom'
-import {
-  LayoutDashboard, Building2, Hash, Bot, Search, Globe, BarChart3,
-  Sparkles, Zap, Home, Workflow, Trees, Settings,
-} from 'lucide-react'
+import { Home, Workflow, Trees, Settings } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 type NavItem = { to: string; icon: typeof Home; label: string }
@@ -14,20 +11,6 @@ const sections: { label: string; items: NavItem[] }[] = [
       { to: '/app/properties', icon: Home, label: 'Deal Finder' },
       { to: '/app/land', icon: Trees, label: 'Land & Wholesale' },
       { to: '/app/leads', icon: Workflow, label: 'Pipeline' },
-    ],
-  },
-  {
-    label: 'Visibility',
-    items: [
-      { to: '/app/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-      { to: '/app/brands', icon: Building2, label: 'Brands' },
-      { to: '/app/keywords', icon: Hash, label: 'Keywords' },
-      { to: '/app/prompts', icon: Sparkles, label: 'Prompt Discovery' },
-      { to: '/app/ai', icon: Bot, label: 'AI Visibility' },
-      { to: '/app/seo', icon: Search, label: 'SEO Rankings' },
-      { to: '/app/recommendations', icon: Zap, label: 'Recommendations' },
-      { to: '/app/site-audit', icon: Globe, label: 'Site Audit' },
-      { to: '/app/attribution', icon: BarChart3, label: 'Attribution' },
     ],
   },
 ]

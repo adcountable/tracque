@@ -20,7 +20,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/app" element={<Layout />}>
-        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route index element={<Navigate to="properties" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="brands" element={<Brands />} />
         <Route path="keywords" element={<Keywords />} />
