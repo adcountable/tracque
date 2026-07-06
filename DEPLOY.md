@@ -73,6 +73,25 @@ curl -X POST "https://<ref>.supabase.co/functions/v1/sweep-county" \
 Returns the top off-market candidates with owner names and the "why";
 everything also lands in `properties` / `property_scores` for querying.
 
+## 4c. National off-market sweep (any county, by FIPS)
+
+No free national parcel API exists — each county publishes differently.
+National coverage = ONE provider keyed by county FIPS:
+
+```bash
+supabase secrets set NATIONAL_PROVIDER=regrid REGRID_API_TOKEN=<token>
+# or: NATIONAL_PROVIDER=reportall REPORTALL_CLIENT_KEY=<key>
+supabase functions deploy national-sweep
+
+curl -X POST "https://<ref>.supabase.co/functions/v1/national-sweep" \
+  -H "Authorization: Bearer <SERVICE_ROLE_KEY>" -H "Content-Type: application/json" \
+  -d '{"user_id":"demo-user","fips":"48201","state":"TX","min_fit":55}'  # Harris County
+```
+
+Target counties are in `src/lib/counties.ts` (largest US counties; top
+decile ≈ 314 counties ≈ 73% of population). Nashville/Davidson also runs
+free + keyless via `sweep-county`.
+
 ## 5. Frontend (~4 min)
 
 ```bash
