@@ -1,5 +1,5 @@
 import { Outlet, NavLink } from 'react-router-dom'
-import { Home, Workflow, Trees, Settings } from 'lucide-react'
+import { Home, Workflow, Trees, Calculator, Map, Settings } from 'lucide-react'
 import { cn } from '../lib/utils'
 
 type NavItem = { to: string; icon: typeof Home; label: string }
@@ -11,6 +11,8 @@ const sections: { label: string; items: NavItem[] }[] = [
       { to: '/app/properties', icon: Home, label: 'Deal Finder' },
       { to: '/app/land', icon: Trees, label: 'Land & Wholesale' },
       { to: '/app/leads', icon: Workflow, label: 'Pipeline' },
+      { to: '/app/calculator', icon: Calculator, label: 'Calculator' },
+      { to: '/app/playbook', icon: Map, label: 'Playbook' },
     ],
   },
 ]

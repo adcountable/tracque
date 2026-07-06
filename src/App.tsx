@@ -13,6 +13,8 @@ import Attribution from './pages/Attribution'
 import Properties from './pages/Properties'
 import Leads from './pages/Leads'
 import LandFlips from './pages/LandFlips'
+import Calculator from './pages/Calculator'
+import Playbook from './pages/Playbook'
 import Settings from './pages/Settings'
 
 export default function App() {
@@ -33,6 +35,8 @@ export default function App() {
         <Route path="properties" element={<Properties />} />
         <Route path="leads" element={<Leads />} />
         <Route path="land" element={<LandFlips />} />
+        <Route path="calculator" element={<Calculator />} />
+        <Route path="playbook" element={<Playbook />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>
