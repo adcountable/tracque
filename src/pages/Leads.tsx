@@ -370,8 +370,8 @@ export default function Leads() {
           <div key={l.external_id} className="bg-card rounded-xl border border-border p-3">
             <div className="flex items-start gap-3 flex-wrap">
               <div className="w-10 text-center shrink-0">
-                <div className={`text-lg font-bold ${l.fit_score >= 75 ? 'text-emerald-600' : l.fit_score >= 50 ? 'text-amber-500' : 'text-slate-400'}`}>{l.fit_score}</div>
-                <div className="text-[10px] text-muted-foreground">fit</div>
+                <div className={`num text-lg font-semibold ${l.fit_score >= 75 ? 'text-emerald-600' : l.fit_score >= 50 ? 'text-amber-500' : 'text-slate-400'}`}>{l.fit_score}</div>
+                <div className="text-[10px] text-muted-foreground uppercase tracking-wide">fit</div>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-foreground">{l.address}</div>

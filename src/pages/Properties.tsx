@@ -50,11 +50,11 @@ function ScoreRing({ score }: { score: number }) {
   const bg = score >= 75 ? 'bg-emerald-500' : score >= 50 ? 'bg-amber-400' : 'bg-slate-300'
   return (
     <div className="flex flex-col items-center shrink-0 w-14">
-      <span className={`text-2xl font-bold ${color}`}>{score}</span>
+      <span className={`num text-2xl font-semibold ${color}`}>{score}</span>
       <div className="w-full h-1.5 rounded-full bg-muted mt-1 overflow-hidden">
-        <div className={`h-full ${bg}`} style={{ width: `${score}%` }} />
+        <div className={`h-full ${bg} transition-all`} style={{ width: `${score}%` }} />
       </div>
-      <span className="text-[10px] text-muted-foreground mt-0.5">fit</span>
+      <span className="text-[10px] text-muted-foreground mt-0.5 uppercase tracking-wide">fit</span>
     </div>
   )
 }
@@ -73,9 +73,9 @@ function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) 
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-card rounded-lg border border-border px-3 py-2">
-      <div className="text-lg font-bold text-foreground leading-tight">{value}</div>
-      <div className="text-[11px] text-muted-foreground">{label}</div>
+    <div className="bg-card rounded-lg border border-border px-3 py-2.5 lift">
+      <div className="num text-lg font-semibold text-foreground leading-tight">{value}</div>
+      <div className="text-[11px] text-muted-foreground mt-0.5">{label}</div>
     </div>
   )
 }
@@ -91,7 +91,7 @@ function PropertyCard({ s, saved, onToggleSave }: {
   const equityPct = Math.round(p.equity_pct * 100)
 
   return (
-    <div className={`bg-card rounded-xl border border-border border-l-4 ${border} shadow-card`}>
+    <div className={`bg-card rounded-xl border border-border border-l-[3px] ${border} shadow-card lift`}>
       <div className="px-4 py-3">
         <div className="flex items-start gap-3">
           <ScoreRing score={s.fit_score} />
@@ -127,9 +127,9 @@ function PropertyCard({ s, saved, onToggleSave }: {
             </div>
           </div>
           <div className="text-right shrink-0">
-            <div className="font-semibold text-foreground">{money(p.list_price)}</div>
-            <div className="text-xs text-muted-foreground">AVM {money(p.avm_value)}</div>
-            <div className="text-xs mt-1 text-muted-foreground">≈ {money(d.monthly_total)}/mo</div>
+            <div className="num font-semibold text-foreground">{money(p.list_price)}</div>
+            <div className="num text-xs text-muted-foreground">AVM {money(p.avm_value)}</div>
+            <div className="num text-xs mt-1 text-muted-foreground">≈ {money(d.monthly_total)}/mo</div>
             <div className="flex items-center gap-1.5 justify-end mt-1.5">
               <button onClick={onToggleSave} title={saved ? 'Saved' : 'Save to list'}
                 className={`p-1 rounded border ${saved ? 'border-primary text-primary' : 'border-border text-muted-foreground hover:text-primary hover:border-primary'}`}>
