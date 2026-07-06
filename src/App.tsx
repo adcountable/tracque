@@ -12,6 +12,7 @@ import SiteAudit from './pages/SiteAudit'
 import Attribution from './pages/Attribution'
 import Properties from './pages/Properties'
 import Leads from './pages/Leads'
+import LandFlips from './pages/LandFlips'
 import Settings from './pages/Settings'
 
 export default function App() {
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="attribution" element={<Attribution />} />
         <Route path="properties" element={<Properties />} />
         <Route path="leads" element={<Leads />} />
+        <Route path="land" element={<LandFlips />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>
