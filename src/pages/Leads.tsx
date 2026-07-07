@@ -27,6 +27,23 @@ const STRATEGY_LABEL: Record<Strategy, string> = {
   seller_finance: 'Seller Finance', subject_to: 'Subject-To', rent_instead_of_sell: 'Rent Instead',
 }
 
+// Manual owner-trace links — free people-search + entity lookups, pre-filled
+// per lead. More accurate than batch skip-trace at low volume; costs time
+// instead of money.
+function manualTraceLinks(l: Lead): { label: string; href: string }[] {
+  const name = encodeURIComponent(l.owner_name)
+  const cityState = encodeURIComponent(`${l.city}, ${l.state}`)
+  const isEntity = /\b(LLC|TRUST|INC|LP|ESTATE)\b/i.test(l.owner_name)
+  const links = [
+    { label: 'Google', href: `https://www.google.com/search?q=%22${name}%22+${cityState}` },
+    { label: 'TruePeopleSearch', href: `https://www.truepeoplesearch.com/results?name=${name}&citystatezip=${cityState}` },
+    { label: 'FastPeopleSearch', href: `https://www.fastpeoplesearch.com/name/${l.owner_name.trim().toLowerCase().replace(/\s+/g, '-')}_${l.city.toLowerCase().replace(/\s+/g, '-')}-${l.state.toLowerCase()}` },
+    { label: 'Facebook', href: `https://www.facebook.com/search/people/?q=${name}` },
+  ]
+  if (isEntity) links.unshift({ label: 'TN SOS (entity)', href: 'https://tnbear.tn.gov/ecommerce/filingsearch.aspx' })
+  return links
+}
+
 function CopyButton({ text }: { text: string }) {
   const [c, setC] = useState(false)
   return (
@@ -403,6 +420,15 @@ export default function Leads() {
                       </span>
                     : <button onClick={() => trace(l)} className="ml-2 text-primary hover:underline">skip trace</button>}
                 </div>
+                {!l.owner_phone && (
+                  <div className="text-[11px] text-muted-foreground mt-1 flex flex-wrap items-center gap-x-2">
+                    <span>Find owner:</span>
+                    {manualTraceLinks(l).map(x => (
+                      <a key={x.label} href={x.href} target="_blank" rel="noreferrer" className="text-brand hover:underline">{x.label}</a>
+                    ))}
+                    {l.owner_mail_address && <span className="text-muted-foreground">· mails to: <span className="text-foreground">{l.owner_mail_address}</span></span>}
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {(() => { const m = ownerOutreach(l); return <CopyButton text={`Subject: ${m.subject}\n\n${m.body}`} /> })()}
