@@ -96,7 +96,10 @@ Deno.serve(async (req) => {
   }
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 })
 
-  const { user_id, zip = null, max_parcels = 5000, min_fit = 50 } = await req.json()
+  // auto_outreach: after inserting fresh leads, chain skip-trace (real
+  // emails) → send-outreach (CAN-SPAM email, honors dry_run/caps). This is
+  // the email-first path: sweep → trace → send in one scheduled call.
+  const { user_id, zip = null, max_parcels = 5000, min_fit = 50, auto_outreach = false } = await req.json()
   if (!user_id) return new Response(JSON.stringify({ error: 'user_id required' }), { status: 400 })
 
   const { data: scan } = await supabase.from('property_scans').insert({
@@ -198,6 +201,24 @@ Deno.serve(async (req) => {
           outreach_subject: null, outreach_body: null,
         }))
       if (freshLeads.length) await supabase.from('leads').insert(freshLeads)
+
+      // Email-first automation: resolve real emails, then send (guardrails
+      // live in the called functions — dry_run, suppression, daily cap).
+      if (auto_outreach && freshLeads.length) {
+        const base = Deno.env.get('SUPABASE_URL')!
+        const auth = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!}` }
+        try {
+          await fetch(`${base}/functions/v1/skip-trace`, {
+            method: 'POST', headers: auth,
+            body: JSON.stringify({ user_id, lead_ids: freshLeads.map(l => l.external_id) }),
+          })
+          await fetch(`${base}/functions/v1/send-outreach`, {
+            method: 'POST', headers: auth, body: JSON.stringify({ user_id }),
+          })
+        } catch (e) {
+          console.error('auto_outreach chain failed:', e)
+        }
+      }
     }
 
     await supabase.from('property_scans').update({

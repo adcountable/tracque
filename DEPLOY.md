@@ -35,6 +35,13 @@ supabase functions deploy skip-trace        # real owner phone/email (BatchData)
 # Real skip trace for off-market owners (~$0.07–0.25/hit):
 # supabase secrets set SKIP_TRACE_PROVIDER=batchdata BATCHDATA_API_KEY=<key>
 
+# Email-first automation (sweep → skip-trace → send in one call):
+#   curl -X POST .../functions/v1/sweep-county -H "Authorization: Bearer <SRK>" \
+#     -H "Content-Type: application/json" \
+#     -d '{"user_id":"demo-user","zip":"37216","auto_outreach":true}'
+# Schedule that weekly via pg_cron for a hands-off pipeline. Keep
+# outreach_settings.dry_run=true until you have reviewed real drafts.
+
 # Automated outreach (owner-directed email via Resend):
 # supabase secrets set RESEND_API_KEY=<key>   # resend.com free tier
 # Then in the app: Pipeline → Outreach → Settings (From name/email +
