@@ -15,7 +15,7 @@ import {
   type Schedule, type Lead,
 } from '../lib/leadStore'
 import {
-  settingsGaps, ownerOutreach, buildEmail, type OutreachSettings,
+  settingsGaps, ownerOutreach, buildEmail, callScript, type OutreachSettings,
 } from '../lib/outreach'
 import { supabase } from '../integrations/supabase/client'
 import { USER_ID } from '../lib/hooks'
@@ -395,12 +395,23 @@ export default function Leads() {
                 <div className="text-xs text-muted-foreground mt-1">
                   Owner: <span className="text-foreground">{l.owner_name}</span>
                   {l.owner_phone
-                    ? <span className="ml-2 inline-flex items-center gap-2"><span className="inline-flex items-center gap-1"><Phone className="w-3 h-3" />{l.owner_phone}</span><span className="inline-flex items-center gap-1"><Mail className="w-3 h-3" />{l.owner_email}</span></span>
+                    ? <span className="ml-2 inline-flex items-center gap-2">
+                        <a href={`tel:${l.owner_phone.replace(/[^+\d]/g, '')}`} className="inline-flex items-center gap-1 text-brand hover:underline" title="Call (manual dial — DNC-scrub first)">
+                          <Phone className="w-3 h-3" />{l.owner_phone}
+                        </a>
+                        <span className="inline-flex items-center gap-1"><Mail className="w-3 h-3" />{l.owner_email}</span>
+                      </span>
                     : <button onClick={() => trace(l)} className="ml-2 text-primary hover:underline">skip trace</button>}
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {(() => { const m = ownerOutreach(l); return <CopyButton text={`Subject: ${m.subject}\n\n${m.body}`} /> })()}
+                <button
+                  onClick={() => { navigator.clipboard.writeText(callScript(l)); setSendMsg(`Call script for ${l.address} copied — remember to DNC-scrub before dialing.`) }}
+                  title="Copy cold-call script (manual dialing only)"
+                  className="flex items-center gap-1 text-xs px-2 py-1 border border-border rounded hover:border-primary hover:text-primary text-muted-foreground">
+                  <Phone className="w-3 h-3" /> Script
+                </button>
                 {l.sent_at
                   ? <span className="text-[11px] inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100"><Check className="w-3 h-3" /> Sent</span>
                   : <button onClick={() => sendLeads([l])} disabled={sending || !l.owner_email}
@@ -420,9 +431,10 @@ export default function Leads() {
       </div>
 
       <p className="text-[11px] text-muted-foreground mt-8 leading-relaxed border-t border-border pt-4">
-        In production, schedules run server-side (pg_cron → run-scheduled-scans) and the digest is emailed. Auto skip-trace and any
-        owner-direct outreach carry TCPA/DNC obligations — agent-directed outreach is the safer default. This automates sourcing;
-        the close is human, every time.
+        In production, schedules run server-side (pg_cron → run-scheduled-scans) and the digest is emailed. Email is automated with
+        CAN-SPAM rails; letters via the CSV export. Phone is <strong>manual only</strong>: DNC-scrub every number before dialing
+        (calling registry numbers risks $500–$1,500/call), and never auto-dial, drop voicemails, or mass-text (TCPA). This automates
+        sourcing; the conversation and close are human, every time.
       </p>
     </div>
   )

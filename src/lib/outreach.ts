@@ -79,6 +79,39 @@ Would you be open to a short conversation? If not, no problem at all.`,
   }
 }
 
+// Cold-call script for MANUAL dialing (never auto-dial — TCPA). Keeps the
+// opener honest and low-pressure; the goal is a conversation, not a pitch.
+export function callScript(lead: {
+  address: string; owner_name?: string | null; strategy?: string
+}): string {
+  const first = (lead.owner_name ?? '').trim().split(/\s+/)[0] || 'there'
+  const angle = lead.strategy === 'subject_to'
+    ? 'I can take over the payments as-is'
+    : 'I can do flexible terms — including payments over time, which some owners prefer for tax reasons'
+  return `BEFORE DIALING: confirm this number is DNC-scrubbed.
+
+OPENER
+"Hi ${first}? My name's ___ — I'm a local buyer here in Nashville, not an agent.
+I'm calling about your property at ${lead.address}. Do you have 30 seconds?"
+
+IF YES
+"I buy a few properties a year directly from owners — no commissions, no
+repairs, close on your timeline. Have you ever thought about selling that one?"
+
+IF INTEREST
+"${angle}. What would make it worth doing for you?"
+→ LISTEN. Get: their situation, timeline, and a ballpark number. Don't negotiate on this call.
+
+IF NO
+"Totally understand — mind if I leave my number in case anything changes?" → mark lead Dead or long-term follow-up.
+
+IF STOP/ANGRY
+"Sorry to bother you — I'll take you off my list." → suppress + never recontact.
+
+CLOSE
+"Great — I'll text you my info and follow up on ___." → set status Negotiating, book the follow-up.`
+}
+
 export interface BuiltEmail {
   to: string
   from: string
