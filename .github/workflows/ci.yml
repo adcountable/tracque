@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bunx vitest run
+      - run: bunx eslint src/lib/propertyEngine.ts src/lib/leadStore.ts src/lib/intake.ts src/pages/Properties.tsx src/pages/Leads.tsx
+      - run: bunx vite build

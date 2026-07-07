@@ -10,6 +10,11 @@ import PromptDiscovery from './pages/PromptDiscovery'
 import Recommendations from './pages/Recommendations'
 import SiteAudit from './pages/SiteAudit'
 import Attribution from './pages/Attribution'
+import Properties from './pages/Properties'
+import Leads from './pages/Leads'
+import LandFlips from './pages/LandFlips'
+import Calculator from './pages/Calculator'
+import Playbook from './pages/Playbook'
 import Settings from './pages/Settings'
 
 export default function App() {
@@ -17,7 +22,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/app" element={<Layout />}>
-        <Route index element={<Navigate to="dashboard" replace />} />
+        <Route index element={<Navigate to="properties" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="brands" element={<Brands />} />
         <Route path="keywords" element={<Keywords />} />
@@ -27,6 +32,11 @@ export default function App() {
         <Route path="recommendations" element={<Recommendations />} />
         <Route path="site-audit" element={<SiteAudit />} />
         <Route path="attribution" element={<Attribution />} />
+        <Route path="properties" element={<Properties />} />
+        <Route path="leads" element={<Leads />} />
+        <Route path="land" element={<LandFlips />} />
+        <Route path="calculator" element={<Calculator />} />
+        <Route path="playbook" element={<Playbook />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>
