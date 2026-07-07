@@ -50,6 +50,7 @@ interface SweptParcel {
   address: string
   zip: string
   owner_name: string
+  mail_address: string | null   // full owner mailing address → direct mail
   mail_state: string | null
   out_of_state: boolean
   assessed_value: number | null
@@ -126,12 +127,19 @@ Deno.serve(async (req) => {
         if (landUse && !/RES|SINGLE|DUPLEX|DWELL/i.test(landUse)) continue
 
         const mailState = (pick(a, ['MailState', 'OwnState', 'OWNERSTATE', 'MAIL_STATE']) as string | null)?.trim().toUpperCase() ?? null
+        const mailStreet = pick(a, ['MailAddr', 'MailAddress', 'OwnAddr', 'MAILINGADDRESS', 'MAIL_ADDR']) as string | null
+        const mailCity = pick(a, ['MailCity', 'OwnCity', 'MAIL_CITY']) as string | null
+        const mailZip = pick(a, ['MailZip', 'OwnZip', 'MAIL_ZIP']) as string | null
+        const mailAddress = mailStreet
+          ? [mailStreet, mailCity, mailState, mailZip].filter(Boolean).join(', ')
+          : null
         const saleYear = yearFrom(pick(a, ['SaleDate', 'LastSaleDate', 'SALEDT']))
         const assessed = pick(a, ['TotlAppr', 'TotalAppr', 'ApprTotal', 'ASSESSEDVALUE', 'TOTALVALUE']) as number | null
         const salePrice = pick(a, ['SalePrice', 'LastSalePrice', 'SALEPRICE']) as number | null
 
         const base = {
           parcel_id: parcelId, address, zip: parcelZip, owner_name: owner,
+          mail_address: mailAddress,
           mail_state: mailState, out_of_state: mailState != null && mailState !== 'TN',
           assessed_value: assessed != null ? Number(assessed) : null,
           last_sale_year: saleYear, last_sale_price: salePrice != null ? Number(salePrice) : null,
@@ -157,7 +165,7 @@ Deno.serve(async (req) => {
           last_sale_year: k.last_sale_year, ownership_years: k.ownership_years,
           owner_occupied: k.out_of_state ? false : null,  // out-of-state implies absentee; else unknown
           owner_out_of_state: k.out_of_state, owner_type: k.out_of_state ? 'absentee_out_of_state' : null,
-          owner_name: k.owner_name,
+          owner_name: k.owner_name, owner_mail_address: k.mail_address,
           distress_flags: [],
         })),
         { onConflict: 'user_id,source,external_id' },
@@ -172,6 +180,24 @@ Deno.serve(async (req) => {
           reasons: k.reasons, signals: null, deal_math: null,
         }))
       if (scoreRows.length) await supabase.from('property_scores').insert(scoreRows)
+
+      // Feed the outreach pipeline: new off-market owners become leads
+      // (deduped) so schedules/skip-trace/letters can work them.
+      const { data: existing } = await supabase.from('leads').select('external_id').eq('user_id', user_id)
+      const seen = new Set((existing ?? []).map((l: any) => l.external_id))
+      const freshLeads = kept
+        .filter(k => !seen.has(`PARCEL-${k.parcel_id}`))
+        .map(k => ({
+          user_id, external_id: `PARCEL-${k.parcel_id}`,
+          property_id: idByExt.get(`PARCEL-${k.parcel_id}`) ?? null,
+          address: k.address, city: 'Nashville', state: 'TN', neighborhood: null,
+          strategy: 'seller_finance', fit_score: k.fit, list_price: k.assessed_value,
+          equity_pct: null, has_open_mortgage: null,
+          owner_name: k.owner_name, owner_mail_address: k.mail_address,
+          owner_phone: null, owner_email: null, status: 'new',
+          outreach_subject: null, outreach_body: null,
+        }))
+      if (freshLeads.length) await supabase.from('leads').insert(freshLeads)
     }
 
     await supabase.from('property_scans').update({

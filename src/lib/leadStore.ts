@@ -40,6 +40,7 @@ export interface Lead {
   owner_name: string
   owner_phone: string | null
   owner_email: string | null
+  owner_mail_address: string | null   // from county records → direct mail
   status: LeadStatus
   outreach_subject: string
   outreach_body: string
@@ -111,6 +112,20 @@ export function getSettings(): OutreachSettings { return read<OutreachSettings>(
 export function saveSettings(s: OutreachSettings) { write(SETTINGS_KEY, s) }
 
 export function getSuppressions(): string[] { return read<string[]>(SUPPRESS_KEY, []) }
+
+// Mail-merge CSV for direct-mail letters (the channel for off-market
+// owners with no email — county records supply the mailing address).
+export function lettersCSV(leads: Lead[]): string {
+  const rows = leads.filter(l => l.owner_mail_address)
+  const header = 'owner_name,mailing_address,property_address,property_city,property_state,strategy,fit_score'
+  const esc = (v: string | number | null) => {
+    const s = String(v ?? '')
+    return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  return [header, ...rows.map(l =>
+    [l.owner_name, l.owner_mail_address, l.address, l.city, l.state, l.strategy, l.fit_score].map(esc).join(','),
+  )].join('\n')
+}
 export function addSuppression(email: string): string[] {
   const all = getSuppressions()
   const e = email.trim().toLowerCase()
@@ -140,6 +155,7 @@ export function ingestLeads(scheduleId: string | null, strategy: Strategy, fresh
       state: p.state, neighborhood: p.neighborhood, strategy, fit_score: s.fit_score,
       list_price: p.list_price, equity_pct: p.equity_pct, has_open_mortgage: p.has_open_mortgage,
       owner_name: p.owner_name, owner_phone: p.owner_phone, owner_email: p.owner_email,
+      owner_mail_address: null,
       status: 'new', outreach_subject: s.outreach.subject, outreach_body: s.outreach.body,
       sent_at: null, sent_channel: null, first_seen_at: now, updated_at: now,
     })

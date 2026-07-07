@@ -30,6 +30,10 @@ supabase functions deploy run-scheduled-scans
 supabase functions deploy daily-digest
 supabase functions deploy sweep-county     # off-market leads, FREE + keyless
 supabase functions deploy send-outreach     # automated owner email
+supabase functions deploy skip-trace        # real owner phone/email (BatchData)
+
+# Real skip trace for off-market owners (~$0.07–0.25/hit):
+# supabase secrets set SKIP_TRACE_PROVIDER=batchdata BATCHDATA_API_KEY=<key>
 
 # Automated outreach (owner-directed email via Resend):
 # supabase secrets set RESEND_API_KEY=<key>   # resend.com free tier

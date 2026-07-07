@@ -11,7 +11,7 @@ import {
 import {
   getSchedules, saveSchedule, deleteSchedule, newScheduleId,
   getLeads, updateLeadStatus, enrichLead, ingestLeads, markLeadSent,
-  getSettings, saveSettings, getSuppressions, addSuppression,
+  getSettings, saveSettings, getSuppressions, addSuppression, lettersCSV,
   type Schedule, type Lead,
 } from '../lib/leadStore'
 import {
@@ -344,14 +344,27 @@ export default function Leads() {
       </div>
 
       {/* Pipeline */}
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Pipeline</h2>
-        <button
-          onClick={() => sendLeads(leads.filter(l => l.status === 'new' && !l.sent_at && l.owner_email))}
-          disabled={sending}
-          className="text-xs inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-60">
-          <Send className="w-3.5 h-3.5" /> {sending ? 'Sending…' : 'Send all new'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const csv = lettersCSV(leads)
+              if (csv.split('\n').length <= 1) { setSendMsg('No leads with a mailing address yet — run the county sweep (live) to capture owner mailing addresses.'); return }
+              const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+              const a = document.createElement('a'); a.href = url; a.download = 'tracque-letters.csv'; a.click()
+              URL.revokeObjectURL(url)
+            }}
+            className="text-xs inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-border text-foreground hover:border-primary">
+            <Mail className="w-3.5 h-3.5" /> Export letters CSV
+          </button>
+          <button
+            onClick={() => sendLeads(leads.filter(l => l.status === 'new' && !l.sent_at && l.owner_email))}
+            disabled={sending}
+            className="text-xs inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-60">
+            <Send className="w-3.5 h-3.5" /> {sending ? 'Sending…' : 'Send all new'}
+          </button>
+        </div>
       </div>
       <div className="flex flex-wrap gap-1.5 mb-3">
         <button onClick={() => setStatusFilter('all')} className={`text-xs px-2.5 py-1 rounded-full border ${statusFilter === 'all' ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-muted-foreground border-border'}`}>
