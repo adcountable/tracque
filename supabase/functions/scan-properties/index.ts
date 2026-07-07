@@ -295,15 +295,17 @@ function sellerFinanceSignals(p: Property) {
   ]
 }
 
-function subjectToSignals(p: Property) {
+function subjectToSignals(p: Property, downBudget?: number) {
   const lowRate = p.mortgage_rate_est != null && p.mortgage_rate_est < 4.0
   const golden = p.mortgage_origination_year != null && p.mortgage_origination_year >= 2020 && p.mortgage_origination_year <= 2021
-  const equity = p.avm_value - (p.est_mortgage_balance ?? 0)
+  // Seller's equity IS the entry cost — low equity wins for low-cash buyers.
+  const entry = p.has_open_mortgage && p.est_mortgage_balance != null ? Math.max(0, p.list_price - p.est_mortgage_balance) : null
+  const entryCap = Math.max(downBudget ?? 25000, 5000) + 10000
   return [
     { key: 'has_loan', label: 'Existing mortgage to take over', weight: 20, present: p.has_open_mortgage, detail: p.has_open_mortgage ? `~$${Math.round((p.est_mortgage_balance ?? 0) / 1000)}k balance` : 'free & clear' },
     { key: 'low_rate', label: 'Low interest rate', weight: 25, present: lowRate, detail: p.mortgage_rate_est != null ? `~${p.mortgage_rate_est}%` : 'unknown' },
     { key: 'golden_vintage', label: '2020–21 sub-3% vintage', weight: 12, present: golden, detail: p.mortgage_origination_year ? `${p.mortgage_origination_year}` : 'unknown' },
-    { key: 'equity', label: 'Workable equity spread', weight: 10, present: equity > 25000 && equity < p.avm_value * 0.45, detail: p.has_open_mortgage ? `~$${Math.round(equity / 1000)}k equity` : 'n/a' },
+    { key: 'entry', label: 'Low entry cost (fits your cash)', weight: 15, present: entry != null && entry <= entryCap, detail: entry != null ? `~$${Math.round(entry / 1000)}k to enter (seller's equity)` : 'n/a' },
     { key: 'motivation', label: 'Motivation', weight: 15, present: p.days_on_market >= 75 || p.price_cut_count > 0 || p.distress_flags.length > 0, detail: `${p.days_on_market} DOM · ${p.price_cut_count} cuts` },
   ]
 }
@@ -317,7 +319,7 @@ function motivation(p: Property): number {
   return Math.min(100, Math.round(s))
 }
 
-function dealMath(p: Property, strategy: Strategy, budget: number) {
+function dealMath(p: Property, strategy: Strategy, budget: number, downBudget?: number) {
   const taxes = (p.avm_value * 0.0065) / 12, insurance = 105
   if (strategy === 'subject_to' && p.has_open_mortgage && p.mortgage_rate_est != null && p.est_mortgage_balance != null) {
     const yearsLeft = Math.max(15, 30 - (2026 - (p.mortgage_origination_year ?? 2026)))
@@ -325,7 +327,7 @@ function dealMath(p: Property, strategy: Strategy, budget: number) {
     const total = pi + taxes + insurance
     return { strategy, down_payment: Math.round(p.list_price - p.est_mortgage_balance), financed_amount: p.est_mortgage_balance, interest_rate: p.mortgage_rate_est, term_years: yearsLeft, monthly_pi: Math.round(pi), monthly_taxes: Math.round(taxes), monthly_insurance: insurance, monthly_total: Math.round(total), vs_rent_estimate: Math.round(total - p.rent_estimate), fits_budget: budget > 0 ? total <= budget : null }
   }
-  const rate = 6.0, down = Math.round(p.list_price * 0.15), financed = p.list_price - down  // ~15% down (2025 residential seller-finance ≈76% LTV)
+  const rate = 6.0, down = downBudget != null ? Math.min(Math.round(downBudget), Math.round(p.list_price * 0.15)) : Math.round(p.list_price * 0.15), financed = p.list_price - down  // honors buyer cash budget; default ~15% (2025 seller-finance ≈76% LTV)
   const pi = amort(financed, rate, 30), total = pi + taxes + insurance
   return { strategy, down_payment: down, financed_amount: financed, interest_rate: rate, term_years: 30, monthly_pi: Math.round(pi), monthly_taxes: Math.round(taxes), monthly_insurance: insurance, monthly_total: Math.round(total), vs_rent_estimate: Math.round(total - p.rent_estimate), fits_budget: budget > 0 ? total <= budget : null }
 }
@@ -352,6 +354,7 @@ Deno.serve(async (req) => {
   const maxPrice = params.max_price ?? 650000
   const minBeds = params.min_beds ?? 3
   const budget = params.monthly_budget ?? 0
+  const downBudget = params.down_budget
   const buyerName = params.buyer_name ?? 'a buyer'
 
   const { data: scan } = await supabase.from('property_scans').insert({
@@ -363,11 +366,11 @@ Deno.serve(async (req) => {
     const matched = raw.filter(p => p.list_price <= maxPrice && p.beds >= minBeds)
 
     const scored = matched.map(p => {
-      const signals = strategy === 'subject_to' ? subjectToSignals(p) : sellerFinanceSignals(p)
+      const signals = strategy === 'subject_to' ? subjectToSignals(p, downBudget) : sellerFinanceSignals(p)
       const rawScore = signals.reduce((s, x) => s + (x.present ? x.weight : 0), 0)
       const maxScore = signals.reduce((s, x) => s + x.weight, 0)
       const fit = Math.round((rawScore / maxScore) * 100)
-      const deal = dealMath(p, strategy, budget)
+      const deal = dealMath(p, strategy, budget, downBudget)
       return {
         p, fit, motivation: motivation(p), signals,
         reasons: signals.filter(s => s.present).map(s => `${s.label} — ${s.detail}`),

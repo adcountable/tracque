@@ -8,7 +8,7 @@ import {
 
 const baseParams: ScanParams = {
   strategy: 'seller_finance', city: 'Nashville', state: 'TN',
-  max_price: 900000, min_beds: 1, monthly_budget: 4000, buyer_name: 'John',
+  max_price: 900000, min_beds: 1, monthly_budget: 4000, down_budget: 60000, buyer_name: 'John',
 }
 
 describe('generateNashvilleProperties', () => {
@@ -50,6 +50,30 @@ describe('seller_finance scoring', () => {
 })
 
 describe('subject_to scoring', () => {
+  it('zero-down buyer: low-equity takeover outscores high-equity on the entry signal', () => {
+    const base = generateNashvilleProperties(1, 4)[0]
+    const lowEquity: Property = {
+      ...base, has_open_mortgage: true, mortgage_origination_year: 2021, mortgage_rate_est: 2.9,
+      list_price: 400000, est_mortgage_balance: 395000, avm_value: 400000, days_on_market: 90,
+    }
+    const highEquity: Property = { ...lowEquity, est_mortgage_balance: 150000 }
+    const zeroDown = { ...baseParams, strategy: 'subject_to' as const, down_budget: 0 }
+    const lo = scoreProperty(lowEquity, zeroDown)
+    const hi = scoreProperty(highEquity, zeroDown)
+    expect(lo.fit_score).toBeGreaterThan(hi.fit_score)
+    expect(lo.reasons.join(' ')).toContain('Low entry cost')
+    // entry cost = seller's equity: $5k vs $250k
+    expect(lo.deal_math.down_payment).toBe(5000)
+    expect(hi.deal_math.down_payment).toBe(250000)
+  })
+
+  it('seller-finance math honors a $0 down budget (100% carry)', () => {
+    const p = generateNashvilleProperties(1, 6)[0]
+    const s = scoreProperty(p, { ...baseParams, down_budget: 0 })
+    expect(s.deal_math.down_payment).toBe(0)
+    expect(s.deal_math.financed_amount).toBe(p.list_price)
+  })
+
   it('rewards a low-rate 2020-21 vintage loan', () => {
     const golden: Property = {
       ...generateNashvilleProperties(1, 3)[0],

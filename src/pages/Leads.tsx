@@ -143,7 +143,7 @@ export default function Leads() {
     setTimeout(() => {
       const params: ScanParams = {
         strategy: s.strategy, city: s.city, state: s.state,
-        max_price: 5_000_000, min_beds: 0, monthly_budget: 0, buyer_name: 'You',
+        max_price: 5_000_000, min_beds: 0, monthly_budget: 0, down_budget: 25000, buyer_name: 'You',
       }
       // Vary the seed by run count so each run surfaces new inventory.
       const scores = runScan(params, 42 + s.runs * 7)

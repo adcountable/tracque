@@ -110,6 +110,7 @@ export interface ScanParams {
   max_price: number
   min_beds: number
   monthly_budget: number     // buyer's target monthly payment
+  down_budget: number        // cash available for down/entry (0 = no money down)
   buyer_name: string
 }
 
@@ -307,6 +308,9 @@ export const QUICK_LISTS: QuickList[] = [
     match: p => p.price_cut_count > 0 },
   { key: 'low_rate', label: 'Low-Rate Loan', desc: 'Sub-4% mortgage — subject-to target',
     match: p => p.mortgage_rate_est != null && p.mortgage_rate_est < 4 },
+  { key: 'low_entry', label: 'Zero-Down Entry', desc: 'Loan balance near price — take over with almost nothing down',
+    match: p => p.has_open_mortgage && p.est_mortgage_balance != null
+      && (p.list_price - p.est_mortgage_balance) <= p.list_price * 0.08 },
 ]
 
 // ── Rich filters ───────────────────────────────────────────
@@ -406,7 +410,7 @@ function amortizedMonthly(principal: number, annualRate: number, years: number):
   return (principal * r) / (1 - Math.pow(1 + r, -n))
 }
 
-function computeDealMath(p: Property, strategy: Strategy, budget: number): DealMath {
+function computeDealMath(p: Property, strategy: Strategy, budget: number, downBudget?: number): DealMath {
   const taxes = (p.avm_value * 0.0065) / 12
   const insurance = 105
 
@@ -426,9 +430,11 @@ function computeDealMath(p: Property, strategy: Strategy, budget: number): DealM
 
   // Down defaults to 15% — negotiable, but grounded in market reality:
   // 2025 recorded residential seller-financed notes averaged ~76% LTV
-  // (~24% down). 10% understated the monthly payment.
+  // (~24% down). When the buyer sets a cash budget (down_budget), the
+  // math honors it — including $0 down (100% carry; rarer, needs a very
+  // motivated seller, and the monthly runs higher).
   const rate = 6.0
-  const down = Math.round(p.list_price * 0.15)
+  const down = downBudget != null ? Math.min(Math.round(downBudget), Math.round(p.list_price * 0.15)) : Math.round(p.list_price * 0.15)
   const financed = p.list_price - down
   const pi = amortizedMonthly(financed, rate, 30)
   const total = pi + taxes + insurance
@@ -460,10 +466,15 @@ function sellerFinanceSignals(p: Property): ScoreSignal[] {
   ]
 }
 
-function subjectToSignals(p: Property): ScoreSignal[] {
+function subjectToSignals(p: Property, downBudget?: number): ScoreSignal[] {
   const lowRate = p.mortgage_rate_est != null && p.mortgage_rate_est < 4.0
   const golden = p.mortgage_origination_year != null && p.mortgage_origination_year >= 2020 && p.mortgage_origination_year <= 2021
-  const equity = p.avm_value - (p.est_mortgage_balance ?? 0)
+  // In subject-to, the seller's equity IS your entry cost (price − balance).
+  // For a low/no-cash buyer, LOW equity is the win — balance near price
+  // means you take over payments with almost nothing to the seller.
+  const entry = p.has_open_mortgage && p.est_mortgage_balance != null
+    ? Math.max(0, p.list_price - p.est_mortgage_balance) : null
+  const entryCap = Math.max(downBudget ?? 25000, 5000) + 10000   // budget + closing-ish buffer
   return [
     { key: 'has_loan', label: 'Existing mortgage to take over', weight: 20, present: p.has_open_mortgage,
       detail: p.has_open_mortgage ? `~$${Math.round((p.est_mortgage_balance ?? 0) / 1000)}k balance` : 'Free & clear — no loan to assume (use seller finance)' },
@@ -471,8 +482,8 @@ function subjectToSignals(p: Property): ScoreSignal[] {
       detail: p.mortgage_rate_est != null ? `~${p.mortgage_rate_est}% rate` : 'Unknown' },
     { key: 'golden_vintage', label: '2020–21 sub-3% vintage', weight: 12, present: golden,
       detail: p.mortgage_origination_year ? `Originated ${p.mortgage_origination_year}` : 'Unknown' },
-    { key: 'equity', label: 'Workable equity spread', weight: 10, present: equity > 25000 && equity < p.avm_value * 0.45,
-      detail: p.has_open_mortgage ? `~$${Math.round(equity / 1000)}k equity` : 'n/a' },
+    { key: 'entry', label: 'Low entry cost (fits your cash)', weight: 15, present: entry != null && entry <= entryCap,
+      detail: entry != null ? `~$${Math.round(entry / 1000)}k to enter (seller's equity)` : 'n/a' },
     { key: 'motivation', label: 'Motivation (DOM / cuts / distress)', weight: 15,
       present: p.days_on_market >= 75 || p.price_cut_count > 0 || p.distress_flags.length > 0,
       detail: `${p.days_on_market} DOM · ${p.price_cut_count} cuts · ${p.distress_flags.join(', ') || 'no flags'}` },
@@ -491,13 +502,13 @@ function motivationScore(p: Property): number {
 }
 
 export function scoreProperty(p: Property, params: ScanParams, universe: Property[] = []): PropertyScore {
-  const signals = params.strategy === 'subject_to' ? subjectToSignals(p) : sellerFinanceSignals(p)
+  const signals = params.strategy === 'subject_to' ? subjectToSignals(p, params.down_budget) : sellerFinanceSignals(p)
   const raw = signals.reduce((sum, s) => sum + (s.present ? s.weight : 0), 0)
   const max = signals.reduce((sum, s) => sum + s.weight, 0)
   const fit = Math.round((raw / max) * 100)
 
   const reasons = signals.filter(s => s.present).map(s => `${s.label} — ${s.detail}`)
-  const deal = computeDealMath(p, params.strategy, params.monthly_budget)
+  const deal = computeDealMath(p, params.strategy, params.monthly_budget, params.down_budget)
   const outreach = draftOutreach(p, params, deal)
   const comps = computeComps(p, universe)
 
