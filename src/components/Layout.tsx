@@ -1,6 +1,7 @@
 import { Outlet, NavLink } from 'react-router-dom'
-import { Home, Workflow, Trees, Calculator, Map, Settings } from 'lucide-react'
+import { Home, Workflow, Trees, Calculator, Map, Settings, LogOut } from 'lucide-react'
 import { cn } from '../lib/utils'
+import { useAuth, AUTH_ENABLED } from '../lib/auth'
 
 type NavItem = { to: string; icon: typeof Home; label: string }
 
@@ -41,6 +42,7 @@ function Item({ to, icon: Icon, label }: NavItem) {
 }
 
 export default function Layout() {
+  const { session, signOut } = useAuth()
   return (
     <div className="flex h-screen bg-background">
       <aside className="w-60 flex flex-col bg-[hsl(var(--sidebar))] shrink-0">
@@ -77,6 +79,12 @@ export default function Layout() {
               </>
             )}
           </NavLink>
+          {AUTH_ENABLED && session && (
+            <button onClick={() => void signOut()}
+              className="w-full flex items-center gap-2.5 pl-3 pr-3 py-2 rounded-md text-[13px] font-medium text-[hsl(var(--sidebar-foreground))] hover:bg-white/[0.04] hover:text-white transition-colors">
+              <LogOut className="w-[17px] h-[17px] opacity-80" strokeWidth={2} /> Sign out
+            </button>
+          )}
         </div>
       </aside>
 

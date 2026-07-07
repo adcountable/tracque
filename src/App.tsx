@@ -1,5 +1,8 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import type { ReactNode } from 'react'
 import Layout from './components/Layout'
+import { AuthProvider, useAuth, AUTH_ENABLED } from './lib/auth'
+import Login from './pages/Login'
 import Landing from './pages/Landing'
 import Dashboard from './pages/Dashboard'
 import Brands from './pages/Brands'
@@ -17,11 +20,24 @@ import Calculator from './pages/Calculator'
 import Playbook from './pages/Playbook'
 import Settings from './pages/Settings'
 
+// Gate /app behind a session when a Supabase project is configured.
+// Demo mode (no env) stays open — nothing real to protect.
+function RequireAuth({ children }: { children: ReactNode }) {
+  const { session, loading } = useAuth()
+  const location = useLocation()
+  if (!AUTH_ENABLED) return <>{children}</>
+  if (loading) return <div className="min-h-screen bg-background" />
+  if (!session) return <Navigate to="/login" state={{ from: location.pathname }} replace />
+  return <>{children}</>
+}
+
 export default function App() {
   return (
+    <AuthProvider>
     <Routes>
       <Route path="/" element={<Landing />} />
-      <Route path="/app" element={<Layout />}>
+      <Route path="/login" element={<Login />} />
+      <Route path="/app" element={<RequireAuth><Layout /></RequireAuth>}>
         <Route index element={<Navigate to="properties" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="brands" element={<Brands />} />
@@ -40,5 +56,6 @@ export default function App() {
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>
+    </AuthProvider>
   )
 }
