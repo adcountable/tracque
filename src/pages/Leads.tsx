@@ -95,7 +95,20 @@ export default function Leads() {
     setShowForm(false)
   }
 
-  function persistSettings(next: OutreachSettings) { setSettings(next); saveSettings(next) }
+  function persistSettings(next: OutreachSettings) {
+    setSettings(next); saveSettings(next)
+    // Live mode: the send-outreach edge function reads settings from the
+    // outreach_settings table — mirror them server-side so real sends
+    // carry the right From identity + CAN-SPAM address.
+    if (LIVE) {
+      void supabase.from('outreach_settings').upsert({
+        user_id: USER_ID, from_name: next.from_name, from_email: next.from_email,
+        reply_to: next.reply_to, physical_address: next.physical_address,
+        signature: next.signature, daily_cap: next.daily_cap, dry_run: next.dry_run,
+        updated_at: new Date().toISOString(),
+      })
+    }
+  }
 
   // Send owner outreach for the given leads. Live when deployed (Resend via
   // send-outreach), simulated locally otherwise. Compliance-gated either way.
