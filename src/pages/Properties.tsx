@@ -23,7 +23,7 @@ const STRATEGIES: { key: Strategy; label: string; blurb: string }[] = [
 const SIGNAL_ICON: Record<string, typeof Clock> = {
   free_clear: Landmark, tenure: Clock, absentee: UserX, dom: Clock,
   cuts: TrendingDown, distress: AlertTriangle, has_loan: Landmark,
-  low_rate: DollarSign, golden_vintage: Sparkles, equity: DollarSign, motivation: AlertTriangle,
+  low_rate: DollarSign, golden_vintage: Sparkles, equity: DollarSign, entry: DollarSign, motivation: AlertTriangle,
 }
 
 const OWNER_TYPE_LABEL: Record<OwnerType, string> = {
@@ -237,6 +237,7 @@ export default function Properties() {
   const [city, setCity] = useState('Nashville')
   const [stateAbbr, setStateAbbr] = useState('TN')
   const [budget, setBudget] = useState(3200)
+  const [downBudget, setDownBudget] = useState(10000)
   const [buyerName, setBuyerName] = useState('John')
   const [running, setRunning] = useState(false)
   const [seed, setSeed] = useState(42)
@@ -258,8 +259,8 @@ export default function Properties() {
   const savedIds = new Set(lists[activeList] ?? [])
 
   const params: ScanParams = useMemo(() => ({
-    strategy, city, state: stateAbbr, max_price: 5_000_000, min_beds: 0, monthly_budget: budget, buyer_name: buyerName,
-  }), [strategy, city, stateAbbr, budget, buyerName])
+    strategy, city, state: stateAbbr, max_price: 5_000_000, min_beds: 0, monthly_budget: budget, down_budget: downBudget, buyer_name: buyerName,
+  }), [strategy, city, stateAbbr, budget, downBudget, buyerName])
 
   // Live mode: when a Supabase project is configured, "Scan market" hits the
   // deployed scan-properties function (RentCast + county records). Otherwise
@@ -294,7 +295,7 @@ export default function Properties() {
       const { data, error } = await supabase.functions.invoke('scan-properties', {
         body: {
           user_id: USER_ID, market: `${city}, ${stateAbbr}`, strategy,
-          params: { max_price: 5_000_000, min_beds: 0, monthly_budget: budget, buyer_name: buyerName },
+          params: { max_price: 5_000_000, min_beds: 0, monthly_budget: budget, down_budget: downBudget, buyer_name: buyerName },
         },
       })
       if (error) throw error
@@ -472,6 +473,11 @@ export default function Properties() {
             <label className="block text-xs text-muted-foreground">Monthly budget
               <input type="number" step={100} value={budget} onChange={e => setBudget(+e.target.value)}
                 className="mt-1 w-full px-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground" />
+            </label>
+            <label className="block text-xs text-muted-foreground">Cash for down ($)
+              <input type="number" step={1000} value={downBudget} onChange={e => setDownBudget(+e.target.value)}
+                className="mt-1 w-full px-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground" />
+              <span className="text-[10px] text-muted-foreground">0 = no money down — ranks low-equity takeovers first</span>
             </label>
             <label className="block text-xs text-muted-foreground">Your name
               <input value={buyerName} onChange={e => setBuyerName(e.target.value)}
