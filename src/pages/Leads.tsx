@@ -44,6 +44,17 @@ function manualTraceLinks(l: Lead): { label: string; href: string }[] {
   return links
 }
 
+// Same property on the portals (photos/history live there).
+function portalLinks(l: Lead): { label: string; href: string }[] {
+  const full = `${l.address}, ${l.city}, ${l.state}`
+  const q = encodeURIComponent(full)
+  const zillowSlug = encodeURIComponent(full.replace(/\s+/g, '-').replace(/,/g, ''))
+  return [
+    { label: 'Zillow', href: `https://www.zillow.com/homes/${zillowSlug}_rb/` },
+    { label: 'Maps', href: `https://www.google.com/maps/place/${q}` },
+  ]
+}
+
 function CopyButton({ text }: { text: string }) {
   const [c, setC] = useState(false)
   return (
@@ -421,6 +432,9 @@ export default function Leads() {
                 <div className="text-xs text-muted-foreground">
                   {l.neighborhood} · {l.city}, {l.state} · {money(l.list_price)} · {Math.round(l.equity_pct * 100)}% equity
                   {!l.has_open_mortgage && ' · free & clear'} · {STRATEGY_LABEL[l.strategy]}
+                  {portalLinks(l).map(x => (
+                    <a key={x.label} href={x.href} target="_blank" rel="noreferrer" className="ml-2 text-brand hover:underline">{x.label} ↗</a>
+                  ))}
                 </div>
                 <div className="text-xs text-muted-foreground mt-1">
                   Owner: <span className="text-foreground">{l.owner_name}</span>
