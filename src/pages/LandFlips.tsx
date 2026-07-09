@@ -10,6 +10,25 @@ import {
 
 const money = (n: number) => '$' + Math.round(n).toLocaleString()
 
+// Land has no street address — the APN is the identity. Link to the
+// authoritative sources: county GIS (exact for Davidson), Regrid's public
+// parcel map, and a web search fallback for other counties.
+function parcelLinks(p: LandScore['parcel']): { label: string; href: string }[] {
+  const apnRaw = p.apn.replace(/[^0-9A-Za-z]/g, '')
+  const links: { label: string; href: string }[] = []
+  if (p.county === 'Davidson') {
+    links.push({ label: 'County GIS', href: `https://maps.nashville.gov/ParcelViewer/?parcelID=${apnRaw}` })
+  } else {
+    links.push({ label: 'County GIS', href: `https://www.google.com/search?q=${encodeURIComponent(`${p.county} County TN GIS parcel viewer ${p.apn}`)}` })
+  }
+  links.push(
+    { label: 'Regrid', href: `https://app.regrid.com/search?query=${encodeURIComponent(`${p.apn} ${p.county} County TN`)}` },
+    { label: 'LandWatch', href: `https://www.landwatch.com/tennessee-land-for-sale/${p.county.toLowerCase()}-county` },
+    { label: 'Maps', href: `https://www.google.com/maps/search/${encodeURIComponent(`${p.location}, ${p.county} County, TN`)}` },
+  )
+  return links
+}
+
 function Copyable({ text, label }: { text: string; label: string }) {
   const [c, setC] = useState(false)
   return (
@@ -101,6 +120,12 @@ function LandCard({ s }: { s: LandScore }) {
               {p.owner_out_of_state && <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-100">Out-of-state owner</span>}
               {!p.has_open_mortgage && <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">Free &amp; clear</span>}
               <span className={`text-[11px] px-2 py-0.5 rounded-full border ${p.buildable ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>{p.buildable ? 'Buildable' : p.in_floodplain ? 'Floodplain' : 'No access'}</span>
+            </div>
+            <div className="text-[11px] text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-2" onClick={e => e.stopPropagation()}>
+              <span>View on:</span>
+              {parcelLinks(p).map(x => (
+                <a key={x.label} href={x.href} target="_blank" rel="noreferrer" className="text-brand hover:underline">{x.label} ↗</a>
+              ))}
             </div>
           </div>
           <div className="text-right shrink-0">
