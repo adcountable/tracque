@@ -38,6 +38,20 @@ const DISTRESS_LABEL: Record<string, string> = {
 const money = (n: number) => '$' + Math.round(n).toLocaleString()
 const LS_KEY = 'tracque_saved_lists'
 
+// One-click views of the same property on the big portals (photos live
+// there). Address-based deep links — no scraping, no API keys.
+function listingLinks(p: PropertyScore['property']): { label: string; href: string }[] {
+  const full = `${p.address}, ${p.city}, ${p.state} ${p.zip}`
+  const q = encodeURIComponent(full)
+  const zillowSlug = encodeURIComponent(full.replace(/\s+/g, '-').replace(/,/g, ''))
+  return [
+    { label: 'Zillow', href: `https://www.zillow.com/homes/${zillowSlug}_rb/` },
+    { label: 'Redfin', href: `https://www.google.com/search?q=site%3Aredfin.com+%22${encodeURIComponent(p.address)}%22+${encodeURIComponent(p.city)}` },
+    { label: 'Realtor', href: `https://www.realtor.com/realestateandhomes-search?searchQuery=${q}` },
+    { label: 'Maps', href: `https://www.google.com/maps/place/${q}` },
+  ]
+}
+
 type SavedLists = Record<string, string[]>  // list name -> external_ids
 
 function loadLists(): SavedLists {
@@ -124,6 +138,13 @@ function PropertyCard({ s, saved, onToggleSave }: {
                   <Clock className="w-3 h-3" /> {p.days_on_market} DOM
                 </span>
               )}
+            </div>
+            {/* Photos + same listing on the portals */}
+            <div className="text-[11px] text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-2" onClick={e => e.stopPropagation()}>
+              <span>View on:</span>
+              {listingLinks(p).map(x => (
+                <a key={x.label} href={x.href} target="_blank" rel="noreferrer" className="text-brand hover:underline">{x.label} ↗</a>
+              ))}
             </div>
           </div>
           <div className="text-right shrink-0">
