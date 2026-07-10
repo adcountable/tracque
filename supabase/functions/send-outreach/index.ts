@@ -61,7 +61,7 @@ async function resendSend(apiKey: string, e: { from: string; to: string; reply_t
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type' } })
+    return new Response(null, { headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' } })
   }
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 })
 
