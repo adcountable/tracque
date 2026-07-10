@@ -25,6 +25,7 @@ type Strategy = 'seller_finance' | 'subject_to' | 'rent_instead_of_sell'
 
 interface Property {
   external_id: string; source: string; asset_type: string
+  property_type: string
   address: string; neighborhood: string; city: string; state: string; zip: string
   beds: number; baths: number; sqft: number; year_built: number
   lat: number | null; lng: number | null
@@ -38,6 +39,16 @@ interface Property {
   owner_type: string; is_vacant: boolean; distress_flags: string[]
   owner_name: string; owner_phone: string | null; owner_email: string | null
   agent_name: string; agent_brokerage: string; listing_url: string
+}
+
+function normalizePropertyType(raw: string | null | undefined): string {
+  const v = (raw ?? '').toLowerCase()
+  if (/multi|duplex|triplex|fourplex|apartment/.test(v)) return 'multi_family'
+  if (/condo/.test(v)) return 'condo'
+  if (/town/.test(v)) return 'townhouse'
+  if (/manufactured|mobile/.test(v)) return 'manufactured'
+  if (/single|sfr|residential|house/.test(v) || v === '') return 'single_family'
+  return 'other'
 }
 
 function deriveOwner(occupied: boolean, outOfState: boolean): string {
@@ -164,6 +175,7 @@ async function fetchFromRentCast(market: string, params: any): Promise<Property[
 
     props.push({
       external_id: r.id ?? `RC-${i}`, source: 'rentcast', asset_type: 'sfh',
+      property_type: normalizePropertyType(r.propertyType),
       address: r.formattedAddress ?? r.addressLine1 ?? 'Unknown',
       neighborhood: r.county ?? city, city, state: state || 'TN', zip: r.zipCode ?? '',
       beds: r.bedrooms ?? 0, baths: r.bathrooms ?? 0, sqft: r.squareFootage ?? 0,
@@ -260,7 +272,7 @@ function mockNashville(count: number): Property[] {
     if (own > 20 && rnd() > 0.8) flags.push('probate')
     if (vacant) flags.push('vacant')
     out.push({
-      external_id: `NSH-${(42000 + i).toString(36).toUpperCase()}`, source: 'mock', asset_type: 'sfh',
+      external_id: `NSH-${(42000 + i).toString(36).toUpperCase()}`, source: 'mock', asset_type: 'sfh', property_type: 'single_family',
       address: `${Math.floor(btw(100, 4999))} ${pick(STREETS)}`, neighborhood: h[0], city: 'Nashville',
       state: 'TN', zip: h[1], lat: null, lng: null,
       beds, baths: Math.max(1, beds - 1), sqft, year_built: Math.floor(btw(1948, 2016)),
