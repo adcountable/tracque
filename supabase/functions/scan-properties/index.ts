@@ -27,6 +27,7 @@ interface Property {
   external_id: string; source: string; asset_type: string
   address: string; neighborhood: string; city: string; state: string; zip: string
   beds: number; baths: number; sqft: number; year_built: number
+  lat: number | null; lng: number | null
   list_price: number; days_on_market: number; price_cut_count: number
   total_price_cut_pct: number; status: string; avm_value: number; rent_estimate: number
   last_sale_price: number; last_sale_year: number; ownership_years: number
@@ -166,7 +167,8 @@ async function fetchFromRentCast(market: string, params: any): Promise<Property[
       address: r.formattedAddress ?? r.addressLine1 ?? 'Unknown',
       neighborhood: r.county ?? city, city, state: state || 'TN', zip: r.zipCode ?? '',
       beds: r.bedrooms ?? 0, baths: r.bathrooms ?? 0, sqft: r.squareFootage ?? 0,
-      year_built: r.yearBuilt ?? 0, list_price: listPrice,
+      year_built: r.yearBuilt ?? 0, lat: r.latitude ?? null, lng: r.longitude ?? null,
+      list_price: listPrice,
       days_on_market: r.daysOnMarket ?? 0, price_cut_count: cuts,
       total_price_cut_pct: Math.max(0, totalCutPct),
       status: cuts > 0 ? 'price_reduced' : 'active',
@@ -260,7 +262,8 @@ function mockNashville(count: number): Property[] {
     out.push({
       external_id: `NSH-${(42000 + i).toString(36).toUpperCase()}`, source: 'mock', asset_type: 'sfh',
       address: `${Math.floor(btw(100, 4999))} ${pick(STREETS)}`, neighborhood: h[0], city: 'Nashville',
-      state: 'TN', zip: h[1], beds, baths: Math.max(1, beds - 1), sqft, year_built: Math.floor(btw(1948, 2016)),
+      state: 'TN', zip: h[1], lat: null, lng: null,
+      beds, baths: Math.max(1, beds - 1), sqft, year_built: Math.floor(btw(1948, 2016)),
       list_price: list, days_on_market: dom, price_cut_count: cuts,
       total_price_cut_pct: cuts > 0 ? +(btw(2, 9) * cuts * 0.6).toFixed(1) : 0,
       status: cuts > 0 ? 'price_reduced' : dom > 120 ? 'back_on_market' : 'active',

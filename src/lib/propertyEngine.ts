@@ -30,6 +30,8 @@ export interface Property {
   baths: number
   sqft: number
   year_built: number
+  lat: number | null
+  lng: number | null
   list_price: number
   days_on_market: number
   price_cut_count: number
@@ -127,18 +129,18 @@ function mulberry32(seed: number) {
 }
 
 const NASHVILLE_NEIGHBORHOODS = [
-  { name: 'East Nashville', zip: '37206', tier: 1.15 },
-  { name: 'Inglewood', zip: '37216', tier: 1.05 },
-  { name: 'The Nations', zip: '37209', tier: 1.2 },
-  { name: 'Germantown', zip: '37208', tier: 1.35 },
-  { name: 'Donelson', zip: '37214', tier: 0.9 },
-  { name: 'Madison', zip: '37115', tier: 0.72 },
-  { name: 'Hermitage', zip: '37076', tier: 0.82 },
-  { name: 'Antioch', zip: '37013', tier: 0.68 },
-  { name: 'Old Hickory', zip: '37138', tier: 0.78 },
-  { name: 'Goodlettsville', zip: '37072', tier: 0.75 },
-  { name: 'Bellevue', zip: '37221', tier: 0.95 },
-  { name: 'Whites Creek', zip: '37189', tier: 0.7 },
+  { name: 'East Nashville', zip: '37206', tier: 1.15, lat: 36.180, lng: -86.735 },
+  { name: 'Inglewood', zip: '37216', tier: 1.05, lat: 36.216, lng: -86.715 },
+  { name: 'The Nations', zip: '37209', tier: 1.2, lat: 36.157, lng: -86.855 },
+  { name: 'Germantown', zip: '37208', tier: 1.35, lat: 36.178, lng: -86.789 },
+  { name: 'Donelson', zip: '37214', tier: 0.9, lat: 36.169, lng: -86.664 },
+  { name: 'Madison', zip: '37115', tier: 0.72, lat: 36.256, lng: -86.713 },
+  { name: 'Hermitage', zip: '37076', tier: 0.82, lat: 36.195, lng: -86.596 },
+  { name: 'Antioch', zip: '37013', tier: 0.68, lat: 36.049, lng: -86.672 },
+  { name: 'Old Hickory', zip: '37138', tier: 0.78, lat: 36.252, lng: -86.640 },
+  { name: 'Goodlettsville', zip: '37072', tier: 0.75, lat: 36.323, lng: -86.713 },
+  { name: 'Bellevue', zip: '37221', tier: 0.95, lat: 36.076, lng: -86.940 },
+  { name: 'Whites Creek', zip: '37189', tier: 0.7, lat: 36.273, lng: -86.828 },
 ]
 
 // Generic districts for any non-Nashville market (nationwide support).
@@ -228,6 +230,8 @@ export function generateProperties(city = 'Nashville', state = 'TN', count = 18,
     const status: Property['status'] = priceCuts > 0 ? 'price_reduced'
       : dom > 120 ? 'back_on_market' : 'active'
 
+    const hoodLat = (hood as { lat?: number }).lat
+    const hoodLng = (hood as { lng?: number }).lng
     props.push({
       external_id: `${(isNashville ? 'NSH' : city.slice(0, 3).toUpperCase())}-${(seed * 1000 + i).toString(36).toUpperCase()}`,
       source: 'mock',
@@ -237,6 +241,8 @@ export function generateProperties(city = 'Nashville', state = 'TN', count = 18,
       city,
       state,
       zip: hood.zip,
+      lat: hoodLat != null ? +(hoodLat + (rnd() - 0.5) * 0.02).toFixed(5) : null,
+      lng: hoodLng != null ? +(hoodLng + (rnd() - 0.5) * 0.02).toFixed(5) : null,
       beds,
       baths,
       sqft,
@@ -323,6 +329,9 @@ export interface PropertyFilters {
   minBaths?: number
   minSqft?: number
   minYear?: number
+  minDOM?: number
+  maxDOM?: number
+  bounds?: { n: number; s: number; e: number; w: number }   // map viewport
   minEquityPct?: number        // 0–100 (UI %), converted internally
   minOwnershipYears?: number
   ownerType?: OwnerType | 'any'
@@ -338,6 +347,13 @@ export function applyFilters(props: Property[], f: PropertyFilters): Property[] 
     if (f.minBaths != null && p.baths < f.minBaths) return false
     if (f.minSqft != null && p.sqft < f.minSqft) return false
     if (f.minYear != null && p.year_built < f.minYear) return false
+    if (f.minDOM != null && p.days_on_market < f.minDOM) return false
+    if (f.maxDOM != null && p.days_on_market > f.maxDOM) return false
+    if (f.bounds != null) {
+      if (p.lat == null || p.lng == null) return false
+      const b = f.bounds
+      if (p.lat > b.n || p.lat < b.s || p.lng > b.e || p.lng < b.w) return false
+    }
     if (f.minEquityPct != null && p.equity_pct * 100 < f.minEquityPct) return false
     if (f.minOwnershipYears != null && p.ownership_years < f.minOwnershipYears) return false
     if (f.ownerType && f.ownerType !== 'any' && p.owner_type !== f.ownerType) return false

@@ -13,6 +13,19 @@ import {
 } from '../lib/propertyEngine'
 import { supabase } from '../integrations/supabase/client'
 import { USER_ID } from '../lib/hooks'
+import { MapContainer, TileLayer, CircleMarker, Popup, useMapEvents } from 'react-leaflet'
+import 'leaflet/dist/leaflet.css'
+
+// Reports the map viewport up so "Limit to map area" can filter the list.
+function BoundsWatcher({ onChange }: { onChange: (b: { n: number; s: number; e: number; w: number }) => void }) {
+  const map = useMapEvents({
+    moveend: () => {
+      const b = map.getBounds()
+      onChange({ n: b.getNorth(), s: b.getSouth(), e: b.getEast(), w: b.getWest() })
+    },
+  })
+  return null
+}
 
 const STRATEGIES: { key: Strategy; label: string; blurb: string }[] = [
   { key: 'seller_finance', label: 'Seller Finance', blurb: 'Owner carries the note — best for free-and-clear owners' },
@@ -272,6 +285,11 @@ export default function Properties() {
   const [minEquityPct, setMinEquityPct] = useState(0)
   const [minOwnershipYears, setMinOwnershipYears] = useState(0)
   const [ownerType, setOwnerType] = useState<OwnerType | 'any'>('any')
+  const [minDOM, setMinDOM] = useState(0)
+  const [maxDOM, setMaxDOM] = useState(0)
+  const [showMap, setShowMap] = useState(false)
+  const [limitToMap, setLimitToMap] = useState(false)
+  const [mapBounds, setMapBounds] = useState<{ n: number; s: number; e: number; w: number } | null>(null)
 
   // Saved lists
   const [lists, setLists] = useState<SavedLists>({})
@@ -297,13 +315,15 @@ export default function Properties() {
   const { results, summary } = useMemo(() => {
     const filters: PropertyFilters = {
       quickLists, maxPrice, minBeds, minBaths: minBaths || undefined,
+      minDOM: minDOM || undefined, maxDOM: maxDOM || undefined,
+      bounds: limitToMap && mapBounds ? mapBounds : undefined,
       minEquityPct: minEquityPct || undefined, minOwnershipYears: minOwnershipYears || undefined,
       ownerType,
     }
     const filteredIds = new Set(applyFilters(allScores.map(s => s.property), filters).map(p => p.external_id))
     const results = allScores.filter(s => filteredIds.has(s.property.external_id))
     return { results, summary: summarize(results.map(s => s.property)) }
-  }, [allScores, quickLists, maxPrice, minBeds, minBaths, minEquityPct, minOwnershipYears, ownerType])
+  }, [allScores, quickLists, maxPrice, minBeds, minBaths, minDOM, maxDOM, limitToMap, mapBounds, minEquityPct, minOwnershipYears, ownerType])
 
   async function handleScan() {
     setRunning(true)
@@ -414,6 +434,10 @@ export default function Properties() {
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-primary/40 text-sm text-primary hover:bg-primary/5">
           <Workflow className="w-4 h-4" /> Automate this search
         </button>
+        <button onClick={() => setShowMap(m => !m)}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm ${showMap ? 'border-primary text-primary bg-primary/5' : 'border-border text-foreground hover:border-primary'}`}>
+          <MapPin className="w-4 h-4" /> Map
+        </button>
         <button onClick={exportCSV} disabled={results.length === 0}
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm text-foreground hover:border-primary disabled:opacity-50">
           <Download className="w-4 h-4" /> Export CSV
@@ -450,7 +474,53 @@ export default function Properties() {
             </button>
           )}
         </div>
+        {liveScores && quickLists.length > 0 && (
+          <p className="text-[11px] text-amber-700 mt-1.5">
+            Heads up: on live data, records-based lists (Free &amp; Clear, High Equity, Tax Delinquent, Vacant, Low-Rate, Zero-Down, Tired Landlord) stay empty until county/lien records are connected — RentCast listings don't carry those fields.
+          </p>
+        )}
       </div>
+
+      {/* Map */}
+      {showMap && (
+        <div className="mb-5">
+          <div className="rounded-xl overflow-hidden border border-border" style={{ height: 380 }}>
+            <MapContainer center={[36.163, -86.755]} zoom={11} style={{ height: '100%', width: '100%' }}>
+              <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              <BoundsWatcher onChange={setMapBounds} />
+              {allScores.filter(s0 => s0.property.lat != null && s0.property.lng != null).map(s0 => (
+                <CircleMarker
+                  key={s0.property.external_id}
+                  center={[s0.property.lat!, s0.property.lng!]}
+                  radius={8}
+                  pathOptions={{
+                    color: s0.fit_score >= 75 ? '#059669' : s0.fit_score >= 50 ? '#f59e0b' : '#94a3b8',
+                    fillOpacity: 0.75, weight: 1.5,
+                  }}
+                >
+                  <Popup>
+                    <div style={{ fontSize: 13 }}>
+                      <strong>{s0.property.address}</strong><br />
+                      {money(s0.property.list_price)} · fit {s0.fit_score}<br />
+                      {s0.property.beds} bd · {s0.property.days_on_market} DOM
+                    </div>
+                  </Popup>
+                </CircleMarker>
+              ))}
+            </MapContainer>
+          </div>
+          <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+            <input type="checkbox" checked={limitToMap} onChange={e => setLimitToMap(e.target.checked)} />
+            Limit results to map area (pan/zoom, then check this — Zillow-style)
+          </label>
+          {allScores.every(s0 => s0.property.lat == null) && (
+            <p className="text-[11px] text-muted-foreground mt-1">No coordinates on these results — live listings get pins after the next scan (RentCast provides lat/lng).</p>
+          )}
+        </div>
+      )}
 
       <div className="flex gap-5">
         {/* Filter rail */}
@@ -471,6 +541,16 @@ export default function Properties() {
               </label>
               <label className="block text-xs text-muted-foreground">Min baths
                 <input type="number" value={minBaths} onChange={e => setMinBaths(+e.target.value)}
+                  className="mt-1 w-full px-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground" />
+              </label>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block text-xs text-muted-foreground">Min DOM
+                <input type="number" value={minDOM} onChange={e => setMinDOM(+e.target.value)}
+                  className="mt-1 w-full px-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground" />
+              </label>
+              <label className="block text-xs text-muted-foreground">Max DOM
+                <input type="number" value={maxDOM} onChange={e => setMaxDOM(+e.target.value)}
                   className="mt-1 w-full px-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground" />
               </label>
             </div>
