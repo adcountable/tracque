@@ -16,11 +16,29 @@
 export type AssetType = 'sfh' | 'rv_park' | 'mh_park' | 'land' | 'multifamily'
 export type Strategy = 'seller_finance' | 'subject_to' | 'rent_instead_of_sell'
 export type OwnerType = 'owner_occupied' | 'absentee_in_state' | 'absentee_out_of_state'
+export type PropertyType = 'single_family' | 'condo' | 'townhouse' | 'multi_family' | 'manufactured' | 'other'
+
+export const PROPERTY_TYPE_LABEL: Record<PropertyType, string> = {
+  single_family: 'Single Family', condo: 'Condo', townhouse: 'Townhouse',
+  multi_family: 'Multi-Family', manufactured: 'Manufactured', other: 'Other',
+}
+
+// Normalize provider strings ("Single Family", "Multi-Family", "Condo"...).
+export function normalizePropertyType(raw: string | null | undefined): PropertyType {
+  const v = (raw ?? '').toLowerCase()
+  if (/multi|duplex|triplex|fourplex|apartment/.test(v)) return 'multi_family'
+  if (/condo/.test(v)) return 'condo'
+  if (/town/.test(v)) return 'townhouse'
+  if (/manufactured|mobile/.test(v)) return 'manufactured'
+  if (/single|sfr|residential|house/.test(v) || v === '') return 'single_family'
+  return 'other'
+}
 
 export interface Property {
   external_id: string
   source: 'mock' | 'rentcast' | 'county'
   asset_type: AssetType
+  property_type: PropertyType
   address: string
   neighborhood: string
   city: string
@@ -179,6 +197,9 @@ export function generateProperties(city = 'Nashville', state = 'TN', count = 18,
   const props: Property[] = []
   for (let i = 0; i < count; i++) {
     const hood = pick(hoods)
+    const typeRoll = rnd()
+    const propertyType: PropertyType = typeRoll < 0.7 ? 'single_family'
+      : typeRoll < 0.82 ? 'townhouse' : typeRoll < 0.92 ? 'condo' : 'multi_family'
     const beds = 2 + Math.floor(rnd() * 4)
     const baths = Math.max(1, beds - 1 + Math.round(rnd()))
     const sqft = Math.round(between(950, 2600) * (0.9 + hood.tier * 0.2))
@@ -236,6 +257,7 @@ export function generateProperties(city = 'Nashville', state = 'TN', count = 18,
       external_id: `${(isNashville ? 'NSH' : city.slice(0, 3).toUpperCase())}-${(seed * 1000 + i).toString(36).toUpperCase()}`,
       source: 'mock',
       asset_type: 'sfh',
+      property_type: propertyType,
       address: `${Math.floor(between(100, 4999))} ${pick(STREETS)}`,
       neighborhood: hood.name,
       city,
@@ -329,6 +351,7 @@ export interface PropertyFilters {
   minBaths?: number
   minSqft?: number
   minYear?: number
+  propertyTypes?: PropertyType[]   // OR; empty/undefined = all
   minDOM?: number
   maxDOM?: number
   bounds?: { n: number; s: number; e: number; w: number }   // map viewport
@@ -347,6 +370,7 @@ export function applyFilters(props: Property[], f: PropertyFilters): Property[] 
     if (f.minBaths != null && p.baths < f.minBaths) return false
     if (f.minSqft != null && p.sqft < f.minSqft) return false
     if (f.minYear != null && p.year_built < f.minYear) return false
+    if (f.propertyTypes?.length && !f.propertyTypes.includes(p.property_type)) return false
     if (f.minDOM != null && p.days_on_market < f.minDOM) return false
     if (f.maxDOM != null && p.days_on_market > f.maxDOM) return false
     if (f.bounds != null) {

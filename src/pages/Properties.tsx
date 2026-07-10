@@ -8,8 +8,8 @@ import {
 import { saveSchedule, newScheduleId } from '../lib/leadStore'
 import {
   runScan, applyFilters, summarize, skipTrace, toCSV, computeComps,
-  QUICK_LISTS, type PropertyScore, type Strategy, type ScanParams,
-  type PropertyFilters, type OwnerType,
+  QUICK_LISTS, PROPERTY_TYPE_LABEL, type PropertyScore, type Strategy, type ScanParams,
+  type PropertyFilters, type OwnerType, type PropertyType,
 } from '../lib/propertyEngine'
 import { supabase } from '../integrations/supabase/client'
 import { USER_ID } from '../lib/hooks'
@@ -130,7 +130,7 @@ function PropertyCard({ s, saved, onToggleSave }: {
               </span>
             </div>
             <div className="text-sm text-muted-foreground mt-0.5">
-              {p.beds} bd · {p.baths} ba · {p.sqft.toLocaleString()} sqft · built {p.year_built} · {OWNER_TYPE_LABEL[p.owner_type]}
+              {PROPERTY_TYPE_LABEL[p.property_type] ?? 'Single Family'} · {p.beds} bd · {p.baths} ba · {p.sqft.toLocaleString()} sqft · built {p.year_built} · {OWNER_TYPE_LABEL[p.owner_type]}
             </div>
             <div className="flex flex-wrap gap-1.5 mt-2">
               <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
@@ -285,6 +285,7 @@ export default function Properties() {
   const [minEquityPct, setMinEquityPct] = useState(0)
   const [minOwnershipYears, setMinOwnershipYears] = useState(0)
   const [ownerType, setOwnerType] = useState<OwnerType | 'any'>('any')
+  const [propertyTypes, setPropertyTypes] = useState<PropertyType[]>([])
   const [minDOM, setMinDOM] = useState(0)
   const [maxDOM, setMaxDOM] = useState(0)
   const [showMap, setShowMap] = useState(false)
@@ -315,6 +316,7 @@ export default function Properties() {
   const { results, summary } = useMemo(() => {
     const filters: PropertyFilters = {
       quickLists, maxPrice, minBeds, minBaths: minBaths || undefined,
+      propertyTypes: propertyTypes.length ? propertyTypes : undefined,
       minDOM: minDOM || undefined, maxDOM: maxDOM || undefined,
       bounds: limitToMap && mapBounds ? mapBounds : undefined,
       minEquityPct: minEquityPct || undefined, minOwnershipYears: minOwnershipYears || undefined,
@@ -323,7 +325,7 @@ export default function Properties() {
     const filteredIds = new Set(applyFilters(allScores.map(s => s.property), filters).map(p => p.external_id))
     const results = allScores.filter(s => filteredIds.has(s.property.external_id))
     return { results, summary: summarize(results.map(s => s.property)) }
-  }, [allScores, quickLists, maxPrice, minBeds, minBaths, minDOM, maxDOM, limitToMap, mapBounds, minEquityPct, minOwnershipYears, ownerType])
+  }, [allScores, quickLists, maxPrice, minBeds, minBaths, propertyTypes, minDOM, maxDOM, limitToMap, mapBounds, minEquityPct, minOwnershipYears, ownerType])
 
   async function handleScan() {
     setRunning(true)
@@ -543,6 +545,18 @@ export default function Properties() {
                 <input type="number" value={minBaths} onChange={e => setMinBaths(+e.target.value)}
                   className="mt-1 w-full px-2 py-1.5 rounded-lg border border-border bg-background text-sm text-foreground" />
               </label>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">Property type</div>
+              <div className="flex flex-wrap gap-1">
+                {(Object.keys(PROPERTY_TYPE_LABEL) as PropertyType[]).filter(t => t !== 'other').map(t => (
+                  <button key={t}
+                    onClick={() => setPropertyTypes(cur => cur.includes(t) ? cur.filter(x => x !== t) : [...cur, t])}
+                    className={`text-[11px] px-2 py-1 rounded-full border ${propertyTypes.includes(t) ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-muted-foreground border-border hover:border-primary/50'}`}>
+                    {PROPERTY_TYPE_LABEL[t]}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <label className="block text-xs text-muted-foreground">Min DOM
