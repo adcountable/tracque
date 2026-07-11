@@ -141,6 +141,12 @@ function PropertyCard({ s, saved, onToggleSave }: {
                   <Landmark className="w-3 h-3" /> Free & clear
                 </span>
               )}
+              {p.has_open_mortgage && p.est_mortgage_balance != null && p.est_mortgage_balance > p.avm_value && (
+                <span title="Balance exceeds value — $0-entry takeover, max seller motivation. LONG-HOLD ONLY: no equity means no early exit."
+                  className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200">
+                  <TrendingDown className="w-3 h-3" /> Underwater takeover
+                </span>
+              )}
               {p.distress_flags.map(f => (
                 <span key={f} className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-100">
                   <AlertTriangle className="w-3 h-3" /> {DISTRESS_LABEL[f] ?? f}
